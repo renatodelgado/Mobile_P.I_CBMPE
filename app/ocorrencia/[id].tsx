@@ -157,6 +157,7 @@ export default function OcorrenciaDetail() {
   const [loading, setLoading] = useState(true);
   const [editMode, setEditMode] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [concluding, setConcluding] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [modalVitimaVisible, setModalVitimaVisible] = useState(false);
@@ -540,6 +541,37 @@ export default function OcorrenciaDetail() {
     }));
   };
 
+  const handleMarcarConcluida = () => {
+    Alert.alert(
+      "Concluir ocorrência",
+      "Você está prestes a concluir esta ocorrência. Após isso ela será fechada e não poderá mais ser editada.\n\nDeseja continuar?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Sim, concluir",
+          style: "destructive",
+          onPress: async () => {
+            if (concluding) return;
+            try {
+              setConcluding(true);
+              await putOcorrencia(Number(id), { statusAtendimento: "concluida" });
+              const oc = await getOcorrenciaPorId(id);
+              setOcorrencia(oc as any);
+              setEditMode(false);
+              Alert.alert("Sucesso", "Ocorrência marcada como concluída.");
+            } catch (err) {
+              console.error("Erro ao marcar como concluída:", err);
+              Alert.alert("Erro", "Não foi possível marcar a ocorrência como concluída.");
+            } finally {
+              setConcluding(false);
+            }
+          }
+        }
+      ],
+      { cancelable: true }
+    );
+  };
+
   const handleSave = async () => {
     if (saving) return;
     setSaving(true);
@@ -796,6 +828,23 @@ export default function OcorrenciaDetail() {
                     <Text style={{ color: "#92400E", fontWeight: "600", flex: 1 }}>
                       Esta ocorrência foi concluída e não pode mais ser editada.
                     </Text>
+                  </View>
+                )}
+
+                {/* Botão para marcar como concluída (quando aplicável) */}
+                {ocorrencia?.statusAtendimento !== "concluida" && ocorrencia?.statusAtendimento !== "nao_atendido" && (
+                  <View style={{ marginTop: 12 }}>
+                    <TouchableOpacity
+                      style={[cadastrarStyles.botaoVermelho, { alignItems: 'center' }]}
+                      onPress={handleMarcarConcluida}
+                      disabled={concluding}
+                    >
+                      {concluding ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text style={cadastrarStyles.botaoTexto}>Marcar como concluída</Text>
+                      )}
+                    </TouchableOpacity>
                   </View>
                 )}
               </>

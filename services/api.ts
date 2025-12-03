@@ -5,7 +5,7 @@ import { uploadToCloudinary } from "../utils/uploadToCloudinary";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from "react-native";
 
-const IP_DA_SUA_MAQUINA = "172.26.47.142";
+const IP_DA_SUA_MAQUINA = "192.168.0.58";
 
 const BASE_URL = __DEV__
   ? Platform.OS === "android"
