@@ -32,7 +32,7 @@ import {
 } from "../styles/Login.styles";
 
 import { Clipboard, Lock } from "phosphor-react-native";
-import { login } from "../services/api"; // ajuste o caminho se necessário
+import { login } from "../services/api";
 import { useAuthStore } from "../store/authStore";
 
 export default function LoginScreen() {
@@ -40,7 +40,7 @@ export default function LoginScreen() {
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [remember, setRemember] = useState(true); // padrão true é melhor UX
+  const [remember, setRemember] = useState(true);
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {

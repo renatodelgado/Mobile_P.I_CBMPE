@@ -178,7 +178,6 @@ const [filtroFim, setFiltroFim] = useState<Date | null>(null);
     setApiError(null);
     try {
       const raw = await fetchOcorrenciasUsuario(usuarioLogadoId);
-      console.log("fetchOcorrenciasUsuario raw:", raw);
 
       const mapped: Ocorrencia[] = (raw || []).map((o: any) => {
         const date = o.dataHoraChamada ? new Date(o.dataHoraChamada) : new Date();
@@ -219,8 +218,7 @@ const [filtroFim, setFiltroFim] = useState<Date | null>(null);
       });
 
       try {
-        const sample = mapped.slice(0, 6).map(m => ({ origId: m.origId, isEquipe: m.isEquipe, isCriadaPorMim: m.isCriadaPorMim }));
-        console.log('[ui] ocorrencias.tsx mapped count ->', mapped.length, 'sample ->', JSON.stringify(sample));
+        // debug logs suppressed
       } catch {}
 
       setOcorrencias(mapped);

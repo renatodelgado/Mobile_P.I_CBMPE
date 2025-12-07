@@ -1,11 +1,10 @@
-// api.ts (refatorado)
-
 import { uploadToCloudinary } from "../utils/uploadToCloudinary";
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 import { Platform } from "react-native";
 
-const IP_DA_SUA_MAQUINA = "192.168.0.58";
+export const IP_DA_SUA_MAQUINA = "192.168.0.58";
 
 const BASE_URL = __DEV__
   ? Platform.OS === "android"
@@ -124,6 +123,32 @@ async function requestJson(url: string, options: RequestInit = {}, timeout = 300
   }
 }
 
+/**
+ * Safe wrapper around requestJson for read-only calls used by the UI.
+ * If device is offline or the request fails with a network error, returns
+ * the provided defaultValue (usually [] or null) instead of throwing/logging.
+ */
+async function safeRequestJson(url: string, options: RequestInit = {}, timeout = 30000, defaultValue: any = null): Promise<any> {
+  try {
+    const net = await NetInfo.fetch();
+    if (!net.isConnected) return defaultValue;
+  } catch {
+    // if NetInfo fails, proceed and let requestJson handle errors
+  }
+
+  try {
+    return await requestJson(url, options, timeout);
+  } catch (err: any) {
+    const msg = String(err?.message || err || '').toLowerCase();
+    if (msg.includes('network request failed') || msg.includes('failed to fetch') || msg.includes('networkerror')) {
+      // silent fail for network errors when offline
+      return defaultValue;
+    }
+    console.error(`Erro na API ${url}:`, err);
+    return defaultValue;
+  }
+}
+
 /** -------------------------
  * Ocorrências
  * ------------------------- */
@@ -131,9 +156,39 @@ async function requestJson(url: string, options: RequestInit = {}, timeout = 300
 /** Buscar todas as ocorrências (sem filtros complexos) */
 export async function fetchOcorrencias(): Promise<OcorrenciaAPI[]> {
   try {
-    return await requestJson(`${BASE_URL}/ocorrencias`);
+    // If offline, return cached generic ocorrencias if present
+    try {
+      const net = await NetInfo.fetch();
+      if (!net.isConnected) {
+        const cached = await AsyncStorage.getItem('@app:cache:ocorrencias_v1');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          return Array.isArray(parsed?.data) ? parsed.data : [];
+        }
+      }
+    } catch (e) {
+      // ignore NetInfo/cache errors and continue to network attempt
+    }
+
+    const url = `${BASE_URL}/ocorrencias`;
+    const res = await safeRequestJson(url, {}, 30000, null);
+    const data = Array.isArray(res) ? res : [];
+
+    // cache results (best-effort) under a generic key
+    try {
+      const key = `@app:cache:ocorrencias_v1`;
+      const prevRaw = await AsyncStorage.getItem(key);
+      const prev = prevRaw ? JSON.parse(prevRaw).data : null;
+      if (!(Array.isArray(data) && data.length === 0 && prev != null)) {
+        await AsyncStorage.setItem(key, JSON.stringify({ updatedAt: Date.now(), data }));
+      }
+    } catch (e) {
+      // ignore cache write failures
+    }
+
+    return data;
   } catch (error) {
-    console.error("Erro na API de ocorrências:", error);
+    // safeRequestJson already handles logging; fallback empty
     return [];
   }
 }
@@ -141,15 +196,77 @@ export async function fetchOcorrencias(): Promise<OcorrenciaAPI[]> {
 /** Buscar ocorrência por ID (rota: GET /ocorrencias/:id) */
 export async function getOcorrenciaPorId(id: string | number): Promise<OcorrenciaAPI | null> {
   try {
-    // Guard: avoid requesting invalid ids (e.g. route params like "new")
+    // Guard: avoid requesting invalid ids (e.g. route params like "new").
+    // Accept numeric IDs, UUIDs or negative temp ids — don't reject non-numeric here.
     const sid = String(id || "").trim();
-    if (!sid || sid.toLowerCase() === "new" || Number.isNaN(Number(sid))) {
+    if (!sid || sid.toLowerCase() === "new") {
       return null;
     }
-    const raw = await requestJson(`${BASE_URL}/ocorrencias/${encodeURIComponent(String(id))}`);
-    return raw as OcorrenciaAPI;
+    // If offline, try to find occurrence in cache first
+    try {
+      const net = await NetInfo.fetch();
+      if (!net.isConnected) {
+        const gen = await AsyncStorage.getItem('@app:cache:ocorrencias_v1');
+        if (gen) {
+          const parsed = JSON.parse(gen);
+          const arr = Array.isArray(parsed?.data) ? parsed.data : [];
+          const found = arr.find((o: any) => String(o?.id) === sid || String(o?.numeroOcorrencia) === sid || String(o?.numeroOcorrencia) === (`#${sid}`) || String(o?.numeroOcorrencia) === (`OCR${sid}`));
+          if (found) {
+            console.log('[api] getOcorrenciaPorId: found in generic cache', { id: sid, foundId: found.id, numero: found.numeroOcorrencia });
+            return found as OcorrenciaAPI;
+          }
+        }
+        // also try user-specific cache pattern
+        // NOTE: without user id here we can't know the user cache key; fallback to generic
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    const raw = await safeRequestJson(`${BASE_URL}/ocorrencias/${encodeURIComponent(String(id))}`, {}, 15000, null);
+    if (raw) return raw as OcorrenciaAPI;
+
+    // If server didn't return a result, try to find it in local cache
+    try {
+      const keyPattern = '@app:cache:ocorrencias_usuario_v1_';
+      // scan possible cached keys (simple approach: try user-specific caches not available here)
+      // try generic occurrences cache first
+      const gen = await AsyncStorage.getItem('@app:cache:ocorrencias_v1');
+      if (gen) {
+        const parsed = JSON.parse(gen);
+        const arr = Array.isArray(parsed?.data) ? parsed.data : [];
+        const found = arr.find((o: any) => String(o?.id) === sid || String(o?.numeroOcorrencia) === sid || String(o?.numeroOcorrencia) === (`#${sid}`) || String(o?.numeroOcorrencia) === (`OCR${sid}`));
+        if (found) {
+          console.log('[api] getOcorrenciaPorId: found in generic cache after network', { id: sid, foundId: found.id, numero: found.numeroOcorrencia });
+          return found as OcorrenciaAPI;
+        }
+      }
+
+      // if not found in generic cache, scan per-user caches
+      try {
+        const allKeys = await AsyncStorage.getAllKeys();
+        const userKeys = allKeys.filter(k => typeof k === 'string' && k.startsWith('@app:cache:ocorrencias_usuario_v1_'));
+        for (const k of userKeys) {
+          try {
+            const raw = await AsyncStorage.getItem(k);
+            if (!raw) continue;
+            const parsed = JSON.parse(raw);
+            const arr = Array.isArray(parsed?.data) ? parsed.data : [];
+            const found = arr.find((o: any) => String(o?.id) === String(id));
+            if (found) return found as OcorrenciaAPI;
+          } catch (e) {
+            // ignore and continue
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    } catch (e) {
+      // ignore cache read errors
+    }
+
+    return null;
   } catch (error) {
-    console.error(`Erro ao buscar ocorrência ${id}:`, error);
     return null;
   }
 }
@@ -157,28 +274,38 @@ export async function getOcorrenciaPorId(id: string | number): Promise<Ocorrenci
 /** Buscar ocorrências do usuário (rota existente) */
 export async function fetchOcorrenciasUsuario(usuarioId: number): Promise<OcorrenciaAPI[]> {
   try {
-    // 1. Ocorrências criadas pelo usuário
-    const created = await requestJson(`${BASE_URL}/ocorrencias/usuario/${usuarioId}`).catch(() => []);
+    // If offline, return cached occurrences for this user (if any)
     try {
-      console.log(`[api] fetchOcorrenciasUsuario: fetched /ocorrencias/usuario/${usuarioId} -> ${Array.isArray(created) ? created.length : 'na'}`);
+      const net = await NetInfo.fetch();
+      if (!net.isConnected) {
+        const key = `@app:cache:ocorrencias_usuario_v1_${usuarioId}`;
+        const raw = await AsyncStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed?.data) ? parsed.data : [];
+        }
+      }
+    } catch (e) {
+      // ignore and continue to network
+    }
+    // 1. Ocorrências criadas pelo usuário
+    const created = await safeRequestJson(`${BASE_URL}/ocorrencias/usuario/${usuarioId}`, {}, 20000, []);
+    try {
     } catch {}
 
     // 1b. fallback: alguns backends não expõem /ocorrencias/usuario/:id —
     // buscar todas e filtrar por campo usuarioId / usuario?.id
-    const allFallback = await requestJson(`${BASE_URL}/ocorrencias`).catch(() => []);
+    const allFallback = await safeRequestJson(`${BASE_URL}/ocorrencias`, {}, 20000, []);
     const createdFromAll = Array.isArray(allFallback)
       ? allFallback.filter((o: any) => (o.usuario && (o.usuario.id === usuarioId || Number(o.usuario.id) === usuarioId)) || Number(o.usuarioId) === usuarioId)
       : [];
     try {
-      console.log(`[api] fetchOcorrenciasUsuario: fetched /ocorrencias -> ${Array.isArray(allFallback) ? allFallback.length : 'na'}, createdFromAll -> ${createdFromAll.length}`);
     } catch {}
 
     // 2. Ocorrências em que ele é membro da equipe (apenas IDs + dados básicos)
-    const memberRaw = await requestJson(`${BASE_URL}/ocorrencia-user/user/${usuarioId}/ocorrencias`).catch(() => []);
+    const memberRaw = await safeRequestJson(`${BASE_URL}/ocorrencia-user/user/${usuarioId}/ocorrencias`, {}, 20000, []);
     try {
-      // log a small sample to inspect structure (1-3 items)
-      const sample = Array.isArray(memberRaw) ? memberRaw.slice(0, 3) : memberRaw;
-      console.log('[api] fetchOcorrenciasUsuario: memberRaw sample ->', JSON.stringify(sample));
+      // log suppressed in production
     } catch {}
 
     const memberIds = Array.isArray(memberRaw)
@@ -199,7 +326,6 @@ export async function fetchOcorrenciasUsuario(usuarioId: number): Promise<Ocorre
       : [];
 
     try {
-      console.log(`[api] fetchOcorrenciasUsuario: fetched memberRaw -> ${Array.isArray(memberRaw) ? memberRaw.length : 'na'}, memberIds -> ${JSON.stringify(memberIds)}`);
     } catch {}
 
     // 3. Buscar detalhes completos das ocorrências de equipe (se existirem IDs)
@@ -223,12 +349,35 @@ export async function fetchOcorrenciasUsuario(usuarioId: number): Promise<Ocorre
     });
 
     try {
-      console.log(`[api] fetchOcorrenciasUsuario: deduped -> ${mapa.size} ids: ${JSON.stringify(Array.from(mapa.keys()))}`);
     } catch {}
 
-    return Array.from(mapa.values());
+    const result = Array.from(mapa.values());
+
+    // write to cache (do not overwrite with empty array if we have a previous cache)
+    try {
+      const key = `@app:cache:ocorrencias_usuario_v1_${usuarioId}`;
+      const prevRaw = await AsyncStorage.getItem(key);
+      const prev = prevRaw ? JSON.parse(prevRaw).data : null;
+      if (!(Array.isArray(result) && result.length === 0 && prev != null)) {
+        await AsyncStorage.setItem(key, JSON.stringify({ updatedAt: Date.now(), data: result }));
+      }
+    } catch (e) {
+      // ignore cache write failures
+    }
+
+    return result;
   } catch (error) {
-    console.error("Erro crítico ao carregar ocorrências do usuário:", error);
+    // on error, try to return cached occurrences for this user
+    try {
+      const key = `@app:cache:ocorrencias_usuario_v1_${usuarioId}`;
+      const raw = await AsyncStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed?.data) ? parsed.data : [];
+      }
+    } catch (e) {
+      // ignore
+    }
     return [];
   }
 }
@@ -240,9 +389,8 @@ export async function fetchOcorrenciasComFiltro(periodo?: { inicio: string; fim:
     if (periodo?.inicio && periodo?.fim) {
       url += `?dataInicio=${encodeURIComponent(periodo.inicio)}&dataFim=${encodeURIComponent(periodo.fim)}`;
     }
-    return await requestJson(url);
+    return await safeRequestJson(url, {}, 30000, []);
   } catch (error) {
-    console.error("Erro na API de ocorrências com filtro:", error);
     return [];
   }
 }
@@ -254,9 +402,8 @@ export async function fetchOcorrenciasPorNatureza(naturezaId: number, periodo?: 
     if (periodo?.inicio && periodo?.fim) {
       url += `&dataInicio=${encodeURIComponent(periodo.inicio)}&dataFim=${encodeURIComponent(periodo.fim)}`;
     }
-    return await requestJson(url);
+    return await safeRequestJson(url, {}, 30000, []);
   } catch (error) {
-    console.error("Erro na API de ocorrências por natureza:", error);
     return [];
   }
 }
@@ -270,7 +417,7 @@ export async function postOcorrencia(payload: any): Promise<any> {
       body: JSON.stringify(body),
     });
   } catch (error) {
-    console.error("Erro na API de post ocorrência:", error);
+    // do not spam console with network errors while offline; rethrow for callers to handle
     throw error;
   }
 }
@@ -284,7 +431,7 @@ export async function postOcorrenciaComTimeout(payload: any, timeout = 30000): P
       body: JSON.stringify(body),
     }, timeout);
   } catch (error) {
-    console.error("Erro na API de post ocorrência com timeout:", error);
+    // rethrow and let caller decide how to log/alert
     throw error;
   }
 }
@@ -325,9 +472,8 @@ export async function fetchVitimasPorOcorrencia(ocorrenciaId: string | number): 
       // inválido — não chamar a API e retornar lista vazia
       return [];
     }
-    return await requestJson(`${BASE_URL}/vitimas/${encodeURIComponent(String(ocorrenciaId))}`);
+    return await safeRequestJson(`${BASE_URL}/vitimas/${encodeURIComponent(String(ocorrenciaId))}`, {}, 15000, []);
   } catch (error) {
-    console.error(`Erro na API de vítimas para ocorrência ${ocorrenciaId}:`, error);
     return [];
   }
 }
@@ -338,18 +484,16 @@ export async function fetchVitimasPorOcorrencia(ocorrenciaId: string | number): 
 
 export async function fetchUsuarios(): Promise<Usuario[]> {
   try {
-    return await requestJson(`${BASE_URL}/users`);
+    return await safeRequestJson(`${BASE_URL}/users`, {}, 20000, []);
   } catch (error) {
-    console.error("Erro na API de usuários:", error);
     return [];
   }
 }
 
 export async function fetchUsuario(id: number): Promise<Usuario | null> {
   try {
-    return await requestJson(`${BASE_URL}/users/id/${id}`);
+    return await safeRequestJson(`${BASE_URL}/users/id/${id}`, {}, 10000, null);
   } catch (error) {
-    console.error("Erro na API de usuário:", error);
     return null;
   }
 }
@@ -368,18 +512,16 @@ export async function postUsuario(payload: any): Promise<any> {
 
 export async function fetchPerfis(): Promise<any[]> {
   try {
-    return await requestJson(`${BASE_URL}/perfis`);
+    return await safeRequestJson(`${BASE_URL}/perfis`, {}, 15000, []);
   } catch (error) {
-    console.error("Erro na API de perfis:", error);
     return [];
   }
 }
 
 export async function fetchUnidadesOperacionais(): Promise<any[]> {
   try {
-    return await requestJson(`${BASE_URL}/unidadesoperacionais`);
+    return await safeRequestJson(`${BASE_URL}/unidadesoperacionais`, {}, 20000, []);
   } catch (error) {
-    console.error("Erro na API de unidades operacionais:", error);
     return [];
   }
 }
@@ -390,36 +532,32 @@ export async function fetchUnidadesOperacionais(): Promise<any[]> {
 
 export async function fetchNaturezasOcorrencias(): Promise<NaturezaOcorrencia[]> {
   try {
-    return await requestJson(`${BASE_URL}/naturezasocorrencias`);
+    return await safeRequestJson(`${BASE_URL}/naturezasocorrencias`, {}, 20000, []);
   } catch (error) {
-    console.error("Erro na API de naturezas:", error);
     return [];
   }
 }
 
 export async function fetchGruposOcorrencias(): Promise<any[]> {
   try {
-    return await requestJson(`${BASE_URL}/gruposocorrencias`);
+    return await safeRequestJson(`${BASE_URL}/gruposocorrencias`, {}, 20000, []);
   } catch (error) {
-    console.error("Erro na API de grupos de ocorrências:", error);
     return [];
   }
 }
 
 export async function fetchSubgruposOcorrencias(): Promise<any[]> {
   try {
-    return await requestJson(`${BASE_URL}/subgruposocorrencias`);
+    return await safeRequestJson(`${BASE_URL}/subgruposocorrencias`, {}, 20000, []);
   } catch (error) {
-    console.error("Erro na API de subgrupos de ocorrências:", error);
     return [];
   }
 }
 
 export async function fetchViaturas(): Promise<Viatura[]> {
   try {
-    return await requestJson(`${BASE_URL}/viaturas`);
+    return await safeRequestJson(`${BASE_URL}/viaturas`, {}, 20000, []);
   } catch (error) {
-    console.error("Erro na API de viaturas:", error);
     return [];
   }
 }
@@ -430,18 +568,16 @@ export async function fetchViaturas(): Promise<Viatura[]> {
 
 export async function fetchRegioes(): Promise<any[]> {
   try {
-    return await requestJson(`${BASE_URL}/regioes`);
+    return await safeRequestJson(`${BASE_URL}/regioes`, {}, 15000, []);
   } catch (error) {
-    console.error("Erro na API de regiões:", error);
     return [];
   }
 }
 
 export async function fetchMunicipiosPE(): Promise<any[]> {
   try {
-    return await requestJson('https://servicodados.ibge.gov.br/api/v1/localidades/estados/26/municipios');
+    return await safeRequestJson('https://servicodados.ibge.gov.br/api/v1/localidades/estados/26/municipios', {}, 15000, []);
   } catch (error) {
-    console.error("Erro na API de municípios de PE:", error);
     return [];
   }
 }
@@ -503,10 +639,28 @@ export async function fetchBairrosFromOSM(municipio: string): Promise<any> {
 
 export async function fetchGeocode(query: string): Promise<any[]> {
   try {
+    // If there's no network, return empty (caller should handle offline behavior)
+    const NetInfo = await import('@react-native-community/netinfo');
+    const net = await NetInfo.fetch();
+    if (!net.isConnected) return [];
+
     const url = `${BASE_URL}/api/geocode?q=${encodeURIComponent(query)}`;
-    return await requestJson(url);
+    try {
+      return await requestJson(url);
+    } catch (err) {
+      // backend geocode failed — try public Nominatim as a fallback
+      try {
+        const nomUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=6&addressdetails=1`;
+        const nomRes = await fetch(nomUrl, { headers: { 'User-Agent': 'ChamaApp/1.0 (+https://example.com)' } });
+        if (!nomRes.ok) return [];
+        const data = await nomRes.json();
+        return Array.isArray(data) ? data : [];
+      } catch (e) {
+        return [];
+      }
+    }
   } catch (error) {
-    console.error("Erro no geocoding:", error);
+    // keep silent on unexpected errors to avoid flooding logs while offline
     return [];
   }
 }
@@ -523,9 +677,26 @@ export async function fetchGeocodeCompleto(query: string): Promise<any[]> {
 
 export async function fetchReverseGeocode(lat: number, lon: number): Promise<any> {
   try {
-    return await requestJson(`${BASE_URL}/api/reverse-geocode?lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lon))}`);
+    const NetInfo = await import('@react-native-community/netinfo');
+    const net = await NetInfo.fetch();
+    if (!net.isConnected) throw new Error('Sem conexão');
+
+    try {
+      return await requestJson(`${BASE_URL}/api/reverse-geocode?lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lon))}`);
+    } catch (err) {
+      // fallback to Nominatim reverse
+      try {
+        const nomUrl = `https://nominatim.openstreetmap.org/reverse?lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lon))}&format=json&addressdetails=1`;
+        const nomRes = await fetch(nomUrl, { headers: { 'User-Agent': 'ChamaApp/1.0 (+https://example.com)' } });
+        if (!nomRes.ok) throw new Error('Nominatim failed');
+        const data = await nomRes.json();
+        return data;
+      } catch (e) {
+        throw err;
+      }
+    }
   } catch (error) {
-    console.error("Erro na API de reverse geocoding:", error);
+    // bubble up the error so callers can decide how to handle it
     throw error;
   }
 }
@@ -535,29 +706,47 @@ export async function fetchReverseGeocode(lat: number, lon: number): Promise<any
  * ------------------------- */
 
 export async function processarUploadsArquivos(arquivos: any[]): Promise<any[]> {
-  const resultados = await Promise.all(
-    arquivos.map(async (arquivo) => {
-      try {
-        if (arquivo.url) return { ...arquivo, url: arquivo.url };
+  const resultados: any[] = [];
 
-        // Se for data URL, converter para Blob/File
-        let file: File;
-        if (arquivo.data && typeof arquivo.data === "string" && arquivo.data.startsWith("data:")) {
-          const response = await fetch(arquivo.data);
-          const blob = await response.blob();
-          file = new File([blob], arquivo.name || `upload_${Date.now()}`, { type: arquivo.type || "application/octet-stream" });
-        } else {
-          file = arquivo;
-        }
-
-        const url = await uploadToCloudinary(file);
-        return { ...arquivo, url };
-      } catch (err) {
-        console.error("Erro no upload de arquivo:", err);
-        return { ...arquivo, url: undefined };
+  for (let i = 0; i < arquivos.length; i++) {
+    const arquivo = arquivos[i];
+    try {
+      if (arquivo.url) {
+        resultados.push({ ...arquivo, url: arquivo.url, name: arquivo.name });
+        // yield to allow UI updates
+        await new Promise((r) => setTimeout(r, 30));
+        continue;
       }
-    })
-  );
+
+      // Prepare a React Native friendly file object:
+      let fileForUpload: any = null;
+      let uploadType: string | undefined = undefined;
+      let uploadName: string | undefined = undefined;
+      if (arquivo.data && typeof arquivo.data === 'string' && arquivo.data.startsWith('data:')) {
+        fileForUpload = arquivo.data;
+        uploadName = arquivo.name || `upload_${Date.now()}`;
+        uploadType = arquivo.type || 'image/png';
+      } else if (arquivo.uri) {
+        fileForUpload = { uri: arquivo.uri, name: arquivo.name || `upload_${Date.now()}`, type: arquivo.type || 'application/octet-stream' };
+        uploadName = fileForUpload.name;
+        uploadType = fileForUpload.type;
+      } else {
+        fileForUpload = arquivo;
+        uploadName = arquivo.name;
+        uploadType = arquivo.type;
+      }
+
+      const url = await uploadToCloudinary(fileForUpload);
+      resultados.push({ ...arquivo, url, name: uploadName, type: uploadType });
+      // brief yield between uploads to keep UI responsive
+      await new Promise((r) => setTimeout(r, 50));
+    } catch (err) {
+      console.error('Erro no upload de arquivo:', err);
+      resultados.push({ ...arquivo, url: undefined });
+      // small yield after failure as well
+      await new Promise((r) => setTimeout(r, 30));
+    }
+  }
 
   return resultados.filter(arquivo => arquivo.url);
 }
@@ -601,9 +790,8 @@ export function prepararAnexos(arquivos: any[], assinaturaDataUrl?: string, nume
  * ------------------------- */
 export async function fetchLesoes(): Promise<any[]> {
   try {
-    return await requestJson(`${BASE_URL}/lesoes`);
+    return await safeRequestJson(`${BASE_URL}/lesoes`, {}, 15000, []);
   } catch (error) {
-    console.error("Erro na API de lesões:", error);
     return [];
   }
 }
@@ -621,7 +809,7 @@ export async function fetchEquipeOcorrencia(ocorrenciaId: string | number): Prom
     // rota esperada: /ocorrencia-user/ocorrencia/:id/users
     // ajuste se sua API usar outro caminho — mantenha todo consumo aqui
     const url = `${BASE_URL}/ocorrencia-user/ocorrencia/${encodeURIComponent(String(ocorrenciaId))}/users`;
-    const data = await requestJson(url);
+    const data = await safeRequestJson(url, {}, 10000, []);
 
     const arr = Array.isArray(data) ? data : [];
 

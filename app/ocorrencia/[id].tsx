@@ -1,3 +1,4 @@
+/* eslint-disable import/no-named-as-default-member */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 // app/ocorrencia/[id].tsx
 import { Ionicons } from "@expo/vector-icons";
@@ -42,6 +43,8 @@ import {
   X,
 } from "phosphor-react-native";
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 import {
   deleteAnexo,
   deleteVitima,
@@ -63,6 +66,8 @@ import {
   putVitima,
   Usuario
 } from "../../services/api";
+import cache from '../../services/cache';
+import offlineService from '../../services/offline';
 
 import {
   AssinaturaBox,
@@ -146,7 +151,8 @@ type Ocorrencia = {
 };
 
 export default function OcorrenciaDetail() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{ id: string; queueItem?: string }>();
+  const { id, queueItem } = params;
   const router = useRouter();
   const styledTheme: any = useStyledTheme();
   const { dark } = useTheme();
@@ -201,6 +207,7 @@ export default function OcorrenciaDetail() {
   });
 
   const [anexosNovos, setAnexosNovos] = useState<LocalAnexo[]>([]);
+  const [editingQueueItemId, setEditingQueueItemId] = useState<string | null>(null);
   const [gettingLocation, setGettingLocation] = useState(false);
   const [buscandoCoords, setBuscandoCoords] = useState(false);
   const [region, setRegion] = useState<any>(null);
@@ -258,10 +265,74 @@ export default function OcorrenciaDetail() {
 
   useEffect(() => {
     async function load() {
+      // If opened from the sync screen with a queueItem id, try to load the queued payload
+      try {
+        if (queueItem) {
+          const qid = decodeURIComponent(String(queueItem));
+          const q = await offlineService.getQueue();
+          const qi = q.find(x => String(x.id) === String(qid));
+          if (qi) {
+            const ocData = qi.payload;
+            const vitData = qi.payload?.vitimas || [];
+
+            // populate state from queued payload so the editor can modify all fields
+            const normalized: Ocorrencia = {
+              id: ocData.id || Number(id) || 0,
+              usuario: ocData.usuario || undefined,
+              unidadeOperacional: ocData.unidadeOperacional || undefined,
+              numeroOcorrencia: ocData.numeroOcorrencia || String(ocData.numeroOcorrencia || `OCR_LOCAL`),
+              dataHoraChamada: ocData.dataHoraChamada || new Date().toISOString(),
+              statusAtendimento: ocData.statusAtendimento || "pendente",
+              descricao: ocData.descricao || "",
+              formaAcionamento: ocData.formaAcionamento || "",
+              naturezaOcorrencia: { id: ocData?.naturezaOcorrencia?.id ?? (ocData.naturezaId ?? 0), nome: ocData?.naturezaOcorrencia?.nome ?? "" },
+              grupoOcorrencia: ocData.grupoOcorrencia || undefined,
+              subgrupoOcorrencia: ocData.subgrupoOcorrencia || undefined,
+              localizacao: ocData.localizacao ? {
+                municipio: ocData.localizacao.municipio || "",
+                bairro: ocData.localizacao.bairro || "",
+                logradouro: ocData.localizacao.logradouro || "",
+                numero: ocData.localizacao.numero || "",
+                pontoReferencia: ocData.localizacao.pontoReferencia || undefined,
+                latitude: ocData.localizacao.latitude || undefined,
+                longitude: ocData.localizacao.longitude || undefined,
+              } : undefined,
+              viatura: ocData.viatura ? { id: ocData.viatura.id || 0, tipo: ocData.viatura.tipo || "", numero: ocData.viatura.numero || "", placa: ocData.viatura.placa || "" } : undefined,
+              anexos: Array.isArray(ocData.anexos) ? ocData.anexos.map((a: any) => ({ id: a.id, urlArquivo: a.urlArquivo || a.uri || a.url || '', nomeArquivo: a.nomeArquivo || a.name || '', tipoArquivo: a.tipoArquivo || a.type || 'imagem' })) : [],
+            };
+
+            setOcorrencia(normalized);
+            setVitimas(Array.isArray(vitData) ? vitData : []);
+            setEditingQueueItemId(String(qi.id));
+
+            setEditable(prev => ({
+              ...prev,
+              descricao: ocData?.descricao || "",
+              formaAcionamento: ocData?.formaAcionamento || "",
+              statusAtendimento: ocData?.statusAtendimento || "pendente",
+              naturezaId: ocData?.naturezaOcorrencia?.id || ocData?.naturezaId || null,
+              grupoId: ocData?.grupoOcorrencia?.id || ocData?.grupoId || null,
+              subgrupoId: ocData?.subgrupoOcorrencia?.id || ocData?.subgrupoId || null,
+              municipio: ocData?.localizacao?.municipio || "",
+              bairro: ocData?.localizacao?.bairro || "",
+              logradouro: ocData?.localizacao?.logradouro || "",
+              numero: ocData?.localizacao?.numero || "",
+              pontoReferencia: ocData?.localizacao?.pontoReferencia || "",
+              latitude: ocData?.localizacao?.latitude || "",
+              longitude: ocData?.localizacao?.longitude || "",
+            }));
+
+            // still load catalogs/users/viaturas below
+          }
+        }
+      } catch (e) {
+        // non-fatal
+      }
       try {
         const [ocData, vitData, nat, grp, sub, usr, vtr] = await Promise.all([
-          getOcorrenciaPorId(id),
-          fetchVitimasPorOcorrencia(id),
+          // Only fetch server occurrence if we're not editing a queue item
+          editingQueueItemId ? Promise.resolve(null) : getOcorrenciaPorId(id),
+          editingQueueItemId ? Promise.resolve([]) : fetchVitimasPorOcorrencia(id),
           fetchNaturezasOcorrencias(),
           fetchGruposOcorrencias(),
           fetchSubgruposOcorrencias(),
@@ -269,16 +340,7 @@ export default function OcorrenciaDetail() {
           fetchViaturas()
         ]);
 
-        const usuarioCriador = ocData?.usuario;
-        if (usuarioCriador) {
-          setUsuarioLogado({
-            id: usuarioCriador.id,
-            nome: usuarioCriador.nome,
-          });
-        } else {
-          // Ou pegue do AsyncStorage, ou deixe null por enquanto
-          setUsuarioLogado(null);
-        }
+        // usuarioLogado será definido abaixo quando tivermos os dados completos
 
         if (ocData) {
           const normalized: Ocorrencia = {
@@ -358,26 +420,39 @@ export default function OcorrenciaDetail() {
           return mapa[chave] || valor.charAt(0).toUpperCase() + valor.slice(1).trim();
         };
 
-        setVitimas(
-          Array.isArray(vitData)
-            ? vitData.map((v: any) => ({
-              id: v.id,
-              nome: v.nome || "",
-              cpfVitima: v.cpf_vitima || v.cpfVitima || "",
-              idade: v.idade || 0,
-              sexo: (v.sexo || "M").toUpperCase() as "M" | "F" | "O",
-              tipoAtendimento: v.tipo_atendimento || v.tipoAtendimento || "",
-              observacoes: v.observacoes || v.observacao || "",
-              etnia: v.etnia || "",
-              destinoVitima: v.destino_vitima || v.destinoVitima || "",
-              lesaoId: (v.lesao_id || v.lesaoId || v.lesao?.id) ? Number(v.lesao_id || v.lesaoId || v.lesao?.id) : undefined,
-              condicaoNome: v.condicaoNome || v.lesao?.tipoLesao || v.lesao?.tipo_lesao || null,
-            }))
-            : []
-        );
-        setNaturezas(nat || []);
-        setGrupos(grp || []);
-        setSubgrupos(sub || []);
+        // if we already loaded queued vitimas earlier, don't overwrite
+        if (!editingQueueItemId) {
+          setVitimas(
+            Array.isArray(vitData)
+              ? vitData.map((v: any) => ({
+                id: v.id,
+                nome: v.nome || "",
+                cpfVitima: v.cpf_vitima || v.cpfVitima || "",
+                idade: v.idade || 0,
+                sexo: (v.sexo || "M").toUpperCase() as "M" | "F" | "O",
+                tipoAtendimento: v.tipo_atendimento || v.tipoAtendimento || "",
+                observacoes: v.observacoes || v.observacao || "",
+                etnia: v.etnia || "",
+                destinoVitima: v.destino_vitima || v.destinoVitima || "",
+                lesaoId: (v.lesao_id || v.lesaoId || v.lesao?.id) ? Number(v.lesao_id || v.lesaoId || v.lesao?.id) : undefined,
+                condicaoNome: v.condicaoNome || v.lesao?.tipoLesao || v.lesao?.tipo_lesao || null,
+              }))
+              : []
+          );
+        }
+        // If the network fetch returned empty (common when offline), fall back to local cached catalogs
+        try {
+          const natFinal = (Array.isArray(nat) && nat.length > 0) ? nat : (await cache.getNaturezasCached()) || [];
+          const grpFinal = (Array.isArray(grp) && grp.length > 0) ? grp : (await cache.getGruposCached()) || [];
+          const subFinal = (Array.isArray(sub) && sub.length > 0) ? sub : (await cache.getSubgruposCached()) || [];
+          setNaturezas(natFinal);
+          setGrupos(grpFinal);
+          setSubgrupos(subFinal);
+        } catch (e) {
+          setNaturezas(nat || []);
+          setGrupos(grp || []);
+          setSubgrupos(sub || []);
+        }
         setUsuarios(usr || []);
         setViaturas(vtr || []);
 
@@ -553,12 +628,57 @@ export default function OcorrenciaDetail() {
           onPress: async () => {
             if (concluding) return;
             try {
-              setConcluding(true);
-              await putOcorrencia(Number(id), { statusAtendimento: "concluida" });
-              const oc = await getOcorrenciaPorId(id);
-              setOcorrencia(oc as any);
-              setEditMode(false);
-              Alert.alert("Sucesso", "Ocorrência marcada como concluída.");
+              // verify connectivity before attempting to mark as concluded
+              const net = await NetInfo.fetch().catch(() => ({ isConnected: false }));
+              if (!net || !net.isConnected) {
+                  // Enfileira a conclusão para processamento quando houver conexão
+                  try {
+                    setConcluding(true);
+                    const payloadForQueue = { id: Number(id), statusAtendimento: 'concluida' };
+                    await offlineService.enqueueAction('update', payloadForQueue);
+
+                    // Atualiza caches locais para refletir imediatamente o estado concluído
+                    try {
+                      const keyGen = '@app:cache:ocorrencias_v1';
+                      const rawGen = await AsyncStorage.getItem(keyGen);
+                      const arrGen = rawGen ? (JSON.parse(rawGen).data || []) : [];
+                      const replacedGen = arrGen.map((o: any) => (String(o.id) === String(id) ? { ...(o || {}), statusAtendimento: 'concluida' } : o));
+                      const existsGen = replacedGen.find((o: any) => String(o.id) === String(id));
+                      const finalGen = existsGen ? replacedGen : [{ id: Number(id), statusAtendimento: 'concluida', numeroOcorrencia: ocorrencia?.numeroOcorrencia || null }, ...replacedGen];
+                      await AsyncStorage.setItem(keyGen, JSON.stringify({ updatedAt: Date.now(), data: finalGen }));
+                    } catch (e) {}
+
+                    try {
+                      const userId = ocorrencia?.usuario?.id || usuarioLogado?.id || null;
+                      if (userId) {
+                        const key = `@app:cache:ocorrencias_usuario_v1_${userId}`;
+                        const raw = await AsyncStorage.getItem(key);
+                        const arr = raw ? (JSON.parse(raw).data || []) : [];
+                        const replaced = arr.map((o: any) => (String(o.id) === String(id) ? { ...(o || {}), statusAtendimento: 'concluida' } : o));
+                        const exists = replaced.find((o: any) => String(o.id) === String(id));
+                        const finalArr = exists ? replaced : [{ id: Number(id), statusAtendimento: 'concluida', numeroOcorrencia: ocorrencia?.numeroOcorrencia || null }, ...replaced];
+                        await AsyncStorage.setItem(key, JSON.stringify({ updatedAt: Date.now(), data: finalArr }));
+                      }
+                    } catch (e) {}
+
+                    // Atualiza o estado local para refletir a conclusão imediatamente
+                    setOcorrencia(prev => prev ? { ...prev, statusAtendimento: 'concluida' } : prev);
+                    Alert.alert('Offline', 'Ocorrência marcada como concluída localmente e será sincronizada quando houver conexão.');
+                  } catch (e) {
+                    console.warn('Erro ao enfileirar conclusão offline', e);
+                    Alert.alert('Erro', 'Não foi possível marcar como concluída offline. Tente novamente.');
+                  } finally {
+                    setConcluding(false);
+                  }
+                  return;
+                }
+
+                setConcluding(true);
+                await putOcorrencia(Number(id), { statusAtendimento: "concluida" });
+                const oc = await getOcorrenciaPorId(id);
+                setOcorrencia(oc as any);
+                setEditMode(false);
+                Alert.alert("Sucesso", "Ocorrência marcada como concluída.");
             } catch (err) {
               console.error("Erro ao marcar como concluída:", err);
               Alert.alert("Erro", "Não foi possível marcar a ocorrência como concluída.");
@@ -583,23 +703,10 @@ export default function OcorrenciaDetail() {
         return;
       }
 
-      // 2. Processa uploads de anexos novos
-      let anexosFinais: any[] = [];
-      if (anexosNovos.length > 0) {
-        const arquivosParaUpload = anexosNovos.map(a => ({
-          uri: a.uri,
-          name: a.name || `anexo_${Date.now()}`,
-          type: a.type || "image/jpeg",
-        }));
-        const uploaded = await processarUploadsArquivos(arquivosParaUpload);
-        const novosFormatados = prepararAnexos(uploaded, undefined, ocorrencia?.numeroOcorrencia || "");
-        anexosFinais = [...(ocorrencia?.anexos?.filter(a => a.tipoArquivo !== "assinatura") || []), ...novosFormatados];
-      } else {
-        anexosFinais = ocorrencia?.anexos?.filter(a => a.tipoArquivo !== "assinatura") || [];
-      }
-
-      // 3. Monta payload da ocorrência (o segredo está aqui!)
-      const payloadOcorrencia = {
+      // build a minimal occurrence payload using current editable fields and local anexos placeholders
+      const existingAnexosLocal = (ocorrencia?.anexos || []).filter(a => a.tipoArquivo !== 'assinatura').map(a => ({ uri: a.urlArquivo, name: a.nomeArquivo, type: a.tipoArquivo }));
+      const novosLocaisLocal = anexosNovos.map(a => ({ uri: a.uri, name: a.name || `anexo_${Date.now()}`, type: a.type || 'image/jpeg' }));
+      const payloadEarly = {
         descricao: editable.descricao.trim(),
         statusAtendimento: editable.statusAtendimento,
         formaAcionamento: editable.formaAcionamento || null,
@@ -617,18 +724,172 @@ export default function OcorrenciaDetail() {
           latitude: editable.latitude || null,
           longitude: editable.longitude || null,
         },
-        // FORMATO CORRETO QUE O BACKEND ACEITA:
-        anexos: anexosFinais.map(a => ({
-          urlArquivo: a.urlArquivo || a.url_arquivo,
-          nomeArquivo: a.nomeArquivo || a.nome_arquivo || "anexo",
-          extensaoArquivo: a.extensaoArquivo || a.extensao_arquivo || a.urlArquivo.split(".").pop(),
-          tipoArquivo: a.tipoArquivo || a.tipo_arquivo || (a.urlArquivo.includes(".pdf") ? "arquivo" : "imagem"),
-          descricao: a.descricao || "",
-        })),
+        // For the offline/early payload include local anexos placeholders (will be uploaded at send-time)
+        anexos: [...existingAnexosLocal, ...novosLocaisLocal],
+      };
+
+      // If this screen was opened to edit a queued item, update the existing queued action
+      if (editingQueueItemId) {
+        const payloadForQueue = { id: ocorrencia?.id ?? Number(id), ...payloadEarly, vitimas };
+        try {
+          const ok = await offlineService.updateAction(editingQueueItemId, payloadForQueue);
+          if (!ok) throw new Error('Item da fila não encontrado');
+          // update caches (generic and per-user) so UI shows changes immediately
+          try {
+            const keyGen = '@app:cache:ocorrencias_v1';
+            const rawGen = await AsyncStorage.getItem(keyGen);
+            const arrGen = rawGen ? (JSON.parse(rawGen).data || []) : [];
+            const replacedGen = arrGen.map((o: any) => (String(o.id) === String(payloadForQueue.id) ? { ...(o || {}), ...payloadForQueue } : o));
+            const existsGen = replacedGen.find((o: any) => String(o.id) === String(payloadForQueue.id));
+            const finalGen = existsGen ? replacedGen : [{ ...payloadForQueue, numeroOcorrencia: ocorrencia?.numeroOcorrencia || null }, ...replacedGen];
+            await AsyncStorage.setItem(keyGen, JSON.stringify({ updatedAt: Date.now(), data: finalGen }));
+          } catch (e) {}
+          try {
+            const userId = ocorrencia?.usuario?.id || usuarioLogado?.id || null;
+            if (userId) {
+              const key = `@app:cache:ocorrencias_usuario_v1_${userId}`;
+              const raw = await AsyncStorage.getItem(key);
+              const arr = raw ? (JSON.parse(raw).data || []) : [];
+              const replaced = arr.map((o: any) => (String(o.id) === String(payloadForQueue.id) ? { ...(o || {}), ...payloadForQueue } : o));
+              const exists = replaced.find((o: any) => String(o.id) === String(payloadForQueue.id));
+              const finalArr = exists ? replaced : [{ ...payloadForQueue, numeroOcorrencia: ocorrencia?.numeroOcorrencia || null }, ...replaced];
+              await AsyncStorage.setItem(key, JSON.stringify({ updatedAt: Date.now(), data: finalArr }));
+            }
+          } catch (e) {}
+          Alert.alert('Salvo localmente', 'As alterações foram salvas na fila e serão enviadas quando possível.');
+          setSaving(false);
+          setEditMode(false);
+          return;
+        } catch (e: any) {
+          console.warn('Erro ao atualizar item da fila', e);
+          Alert.alert('Erro', 'Não foi possível atualizar o item pendente. Tente novamente.');
+          setSaving(false);
+          return;
+        }
+      }
+
+      // If we're offline, enqueue update and update local cache immediately (use payloadEarly)
+      const netState = await NetInfo.fetch().catch(() => ({ isConnected: true }));
+      if (!netState?.isConnected) {
+        const payloadForQueue = { id: Number(id), ...payloadEarly, vitimas };
+        try {
+          await offlineService.enqueueAction('update', payloadForQueue);
+          // update caches (generic and per-user) so UI shows changes immediately
+          try {
+            const keyGen = '@app:cache:ocorrencias_v1';
+            const rawGen = await AsyncStorage.getItem(keyGen);
+            const arrGen = rawGen ? (JSON.parse(rawGen).data || []) : [];
+            const replacedGen = arrGen.map((o: any) => (String(o.id) === String(id) ? { ...(o || {}), ...payloadForQueue } : o));
+            const existsGen = replacedGen.find((o: any) => String(o.id) === String(id));
+            const finalGen = existsGen ? replacedGen : [{ ...payloadForQueue, numeroOcorrencia: ocorrencia?.numeroOcorrencia || null }, ...replacedGen];
+            await AsyncStorage.setItem(keyGen, JSON.stringify({ updatedAt: Date.now(), data: finalGen }));
+          } catch (e) {}
+          try {
+            const userId = ocorrencia?.usuario?.id || usuarioLogado?.id || null;
+            if (userId) {
+              const key = `@app:cache:ocorrencias_usuario_v1_${userId}`;
+              const raw = await AsyncStorage.getItem(key);
+              const arr = raw ? (JSON.parse(raw).data || []) : [];
+              const replaced = arr.map((o: any) => (String(o.id) === String(id) ? { ...(o || {}), ...payloadForQueue } : o));
+              const exists = replaced.find((o: any) => String(o.id) === String(id));
+              const finalArr = exists ? replaced : [{ ...payloadForQueue, numeroOcorrencia: ocorrencia?.numeroOcorrencia || null }, ...replaced];
+              await AsyncStorage.setItem(key, JSON.stringify({ updatedAt: Date.now(), data: finalArr }));
+            }
+          } catch (e) {}
+          Alert.alert('Offline', 'Edição salva localmente e será sincronizada quando houver conexão.');
+          setSaving(false);
+          setEditMode(false);
+          return;
+        } catch (e: any) {
+          console.warn('Erro ao enfileirar edição offline', e);
+          const mensagem = ((e as any)?.message ?? (typeof e === 'string' ? e : String(e ?? ''))) || '';
+          if ((e as any)?.code === 'ATTACHMENTS_NOT_ALLOWED_OFFLINE' || mensagem.toLowerCase().includes('attach') || mensagem.toLowerCase().includes('assinatura')) {
+            Alert.alert('Não permitido offline', 'Esta edição contém anexos ou assinatura que não podem ser salvos enquanto estiver offline. Remova os anexos/assinatura ou conecte-se à internet e tente novamente.');
+            setSaving(false);
+            return;
+          }
+          if (mensagem.toLowerCase().includes('municipio') || mensagem.toLowerCase().includes('logradouro') || mensagem.toLowerCase().includes('bairro') || mensagem.toLowerCase().includes('numero')) {
+            Alert.alert('Não foi possível salvar offline', 'Para salvar offline, preencha Município, Logradouro, Bairro e Número.');
+            setSaving(false);
+            return;
+          }
+          Alert.alert('Erro', 'Não foi possível enfileirar a edição. Tente novamente.');
+          setSaving(false);
+          return;
+        }
+      }
+
+      // 2. Processa uploads de anexos novos (online path)
+      let anexosFinais: any[] = [];
+      if (anexosNovos.length > 0) {
+        const arquivosParaUpload = anexosNovos.map(a => ({
+          uri: a.uri,
+          name: a.name || `anexo_${Date.now()}`,
+          type: a.type || "image/jpeg",
+        }));
+        const uploaded = await processarUploadsArquivos(arquivosParaUpload);
+        const novosFormatados = prepararAnexos(uploaded, undefined, ocorrencia?.numeroOcorrencia || "");
+        anexosFinais = [...(ocorrencia?.anexos?.filter(a => a.tipoArquivo !== "assinatura") || []), ...novosFormatados];
+      } else {
+        anexosFinais = ocorrencia?.anexos?.filter(a => a.tipoArquivo !== "assinatura") || [];
+      }
+
+      // 3. Monta payload da ocorrência (o segredo está aqui!)
+      const payloadOcorrencia = {
+        descricao: payloadEarly.descricao,
+        statusAtendimento: payloadEarly.statusAtendimento,
+        formaAcionamento: payloadEarly.formaAcionamento,
+        naturezaOcorrencia: payloadEarly.naturezaOcorrencia,
+        grupoOcorrencia: payloadEarly.grupoOcorrencia,
+        subgrupoOcorrencia: payloadEarly.subgrupoOcorrencia,
+        viatura: payloadEarly.viatura,
+        localizacao: payloadEarly.localizacao,
+        anexos: anexosFinais,
+        equipe: Array.isArray(equipe) ? equipe.map(u => ({ id: u.id })) : [],
       };
 
       // 4. Atualiza ocorrência
-      await putOcorrencia(Number(id), payloadOcorrencia);
+      try {
+        await putOcorrencia(Number(id), payloadOcorrencia);
+      } catch (err) {
+        // possivelmente sem conexão → enfileira como update e retorna
+        try {
+          const payloadForQueue = { id: ocorrencia?.id ?? Number(id), ...payloadOcorrencia, vitimas };
+          if (editingQueueItemId) {
+            const ok = await offlineService.updateAction(editingQueueItemId, payloadForQueue);
+            if (!ok) throw new Error('Item da fila não encontrado');
+          } else {
+            await offlineService.enqueueAction('update', payloadForQueue);
+          }
+          Alert.alert('Offline', 'Edição salva localmente e será sincronizada quando houver conexão.');
+          setSaving(false);
+          setEditMode(false);
+          return;
+        } catch (e) {
+          console.warn('Erro ao enfileirar edição offline', e);
+          // Mostra mensagem amigável para o usuário quando faltam campos obrigatórios
+          const mensagem = ((e as any)?.message ?? (typeof e === 'string' ? e : String(e ?? ''))) || '';
+
+          // Specific handling for attachments/signature saved offline
+          if ((e as any)?.code === 'ATTACHMENTS_NOT_ALLOWED_OFFLINE' || mensagem.toLowerCase().includes('attach') || mensagem.toLowerCase().includes('assinatura')) {
+            Alert.alert('Não permitido offline', 'Esta edição contém anexos ou assinatura que não podem ser salvos enquanto estiver offline. Remova os anexos/assinatura ou conecte-se à internet e tente novamente.');
+            setSaving(false);
+            return;
+          }
+
+          if (mensagem.toLowerCase().includes('municipio') || mensagem.toLowerCase().includes('logradouro') || mensagem.toLowerCase().includes('bairro') || mensagem.toLowerCase().includes('numero')) {
+            Alert.alert('Não foi possível salvar offline', 'Para salvar offline, preencha Município, Logradouro, Bairro e Número.');
+            setSaving(false);
+            // Mantém o usuário no modo de edição para corrigir os campos
+            return;
+          }
+
+          // Para outros erros, informa o usuário e interrompe o salvamento
+          Alert.alert('Erro', 'Não foi possível enfileirar a edição. Tente novamente.');
+          setSaving(false);
+          return;
+        }
+      }
 
       // 5. Sincroniza vítimas (VERSÃO CORRIGIDA E ROBUSTA)
       // ==================== SINCRONIZAÇÃO DE VÍTIMAS (CORRIGIDA 100%) ====================
@@ -1174,9 +1435,9 @@ export default function OcorrenciaDetail() {
                           }));
                         }
 
-                        Alert.alert("Sucesso!", `Local encontrado:\n${reverse.address.road || reverse.address.neighbourhood || reverse.address.suburb || reverse.address.city || reverse.address.town || "Endereço desconhecido"}`);
+                        // Success feedback removed to avoid console noise
                       } catch (err) {
-                        console.log(err);
+                        // suppressed console.log to reduce noise
                         Alert.alert("Erro", "Não foi possível buscar o endereço");
                       } finally {
                         setBuscandoCoords(false);

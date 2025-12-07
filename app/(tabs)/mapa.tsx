@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable react-hooks/rules-of-hooks */
 // app/(tabs)/mapa.tsx
 import * as Location from "expo-location";
@@ -83,14 +84,16 @@ export default function Mapa() {
         ;
 
       try {
-        const sample = mapped.slice(0, 6).map(m => ({ origId: m.origId, localizacao: m.localizacao, latitude: m.latitude, longitude: m.longitude, status: m.status }));
-        console.log('[map] mapped count ->', mapped.length, 'sample ->', JSON.stringify(sample));
-      } catch {}
+          const sample = mapped.slice(0, 6).map(m => ({ origId: m.origId, localizacao: m.localizacao, latitude: m.latitude, longitude: m.longitude, status: m.status }));
+          // suppressed map debug logs
+      } catch {
+          
+      }
 
       const mappedWithCoords = mapped.filter(o => o.latitude && o.longitude);
       try {
-        const sample2 = mappedWithCoords.slice(0, 6).map(m => ({ origId: m.origId, latitude: m.latitude, longitude: m.longitude }));
-        console.log('[map] mappedWithCoords count ->', mappedWithCoords.length, 'sample ->', JSON.stringify(sample2));
+          const sample2 = mappedWithCoords.slice(0, 6).map(m => ({ origId: m.origId, latitude: m.latitude, longitude: m.longitude }));
+          // suppressed map debug logs
       } catch {}
 
       const final = mappedWithCoords;

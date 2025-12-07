@@ -1,15 +1,19 @@
+/* eslint-disable import/no-named-as-default-member */
 /* eslint-disable react-hooks/rules-of-hooks */
 // app/index.tsx
+import NetInfo from '@react-native-community/netinfo';
 import { Link, useRouter } from "expo-router";
 import {
   Calendar, Car, CheckCircle, Gear, Hourglass, MapPin, Siren, Users, WarningCircle
 } from "phosphor-react-native";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator, Animated, Dimensions, RefreshControl, StatusBar, Text, TouchableOpacity, View
+  ActivityIndicator,
+  Animated, Dimensions, RefreshControl, StatusBar, Text, TouchableOpacity, View
 } from "react-native";
 import { useTheme as useStyledTheme } from "styled-components/native";
 import { fetchOcorrenciasUsuario, fetchUsuario } from "../../services/api";
+import offlineService from '../../services/offline';
 import { useAuthStore } from "../../store/authStore";
 import {
   Container, DateContainer, DateText, EmptyText, Greeting,
@@ -33,6 +37,7 @@ export default function Dashboard() {
   const [usuarioNome, setUsuarioNome] = useState("Usuário");
   const [ocorrencias, setOcorrencias] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pendingSyncs, setPendingSyncs] = useState(0);
 
   const { user } = useAuthStore();
 
@@ -107,8 +112,7 @@ export default function Dashboard() {
       });
 
       try {
-        const sample = mapped.slice(0, 6).map(m => ({ origId: m.origId, isEquipe: m.isEquipe, isCriadaPorMim: m.isCriadaPorMim }));
-        console.log('[ui] index.tsx mapped count ->', mapped.length, 'sample ->', JSON.stringify(sample));
+        // suppressed index debug logs
       } catch {}
 
       setOcorrencias(mapped);
@@ -121,6 +125,31 @@ export default function Dashboard() {
   }, [usuarioLogadoId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // subscribe to offline queue and attempt processing periodically + trigger on reconnection
+  useEffect(() => {
+    let mounted = true;
+    const update = (q: any[]) => { if (!mounted) return; setPendingSyncs(Array.isArray(q) ? q.length : 0); };
+    const unsub = offlineService.subscribe((q: any[]) => update(q));
+    offlineService.getQueueLength().then(n => { if (mounted) setPendingSyncs(n); });
+
+    // process once at start
+    offlineService.processQueue().catch(() => {});
+
+    const interval = setInterval(() => {
+      offlineService.processQueue().catch(() => {});
+      offlineService.getQueueLength().then(n => { if (mounted) setPendingSyncs(n); });
+    }, 20000);
+
+    // NetInfo listener: on connect, try sync immediately
+    const netUnsub = NetInfo.addEventListener(state => {
+      if (state.isConnected) {
+        offlineService.processQueue().catch(() => {});
+      }
+    });
+
+    return () => { mounted = false; unsub(); clearInterval(interval); netUnsub(); };
+  }, []);
 
   const stats = useMemo(() => {
     const total = ocorrencias.length;
@@ -159,9 +188,11 @@ export default function Dashboard() {
           <Greeting>Olá, {usuarioNome}!</Greeting>
           <Subtitle>Suas ocorrências em tempo real</Subtitle>
         </View>
-        <TouchableOpacity onPress={() => router.push("/configuracoes")}>
-          <Gear size={26} color={styledTheme.textSecondary} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+          <TouchableOpacity onPress={() => router.push("/configuracoes")}>
+            <Gear size={26} color={styledTheme.textSecondary} />
+          </TouchableOpacity>
+        </View>
       </Header>
 
       <AnimatedScroll
@@ -177,14 +208,96 @@ export default function Dashboard() {
           paddingBottom: height * 0.3,
         }}
       >
-        <StatsGrid>
-          <StatCard icon={<Siren size={28} weight="fill" color={styledTheme.danger} />} label="Total" value={stats.total} color={styledTheme.danger} />
-          <StatCard icon={<WarningCircle size={28} weight="fill" color={styledTheme.danger} />} label="Pendentes" value={stats.pendente} color={styledTheme.danger} statusFilter="Pendente" />
-          <StatCard icon={<Hourglass size={28} weight="fill" color={styledTheme.info} />} label="Em Andamento" value={stats.andamento} color={styledTheme.info} statusFilter="Em andamento" />
-          <StatCard icon={<CheckCircle size={28} weight="fill" color={styledTheme.success} />} label="Concluídas" value={stats.concluidas} color={styledTheme.success} statusFilter="Concluída" />
-        </StatsGrid>
+        {pendingSyncs > 0 ? (
+  <TouchableOpacity
+    activeOpacity={0.95}
+    onPress={() => router.push('/sincronizacao')}
+    style={{
+      marginHorizontal: 16,
+      marginTop: 16,
+      marginBottom: 8,
+      backgroundColor: '#fee2e2',
+      borderRadius: 16,
+      padding: 20,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 16,
+      borderWidth: 1.5,
+      borderColor: '#dc2626',
+      shadowColor: '#dc2626',
+      shadowOpacity: 0.15,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 8,
+    }}
+  >
+    <View style={{
+      backgroundColor: '#dc2626',
+      padding: 14,
+      borderRadius: 50,
+      alignSelf: 'flex-start',
+    }}>
+      <WarningCircle size={32} weight="fill" color="#fff" />
+    </View>
+
+    <View style={{ flex: 1 }}>
+      <Text style={{
+        fontSize: 18,
+        fontWeight: '800',
+        color: '#991b1b',
+        marginBottom: 4,
+      }}>
+        Atenção: {pendingSyncs} {pendingSyncs > 1 ? 'ações' : 'ação'} pendente{pendingSyncs > 1 ? 's' : ''}
+      </Text>
+      <Text style={{
+        fontSize: 15,
+        color: '#7f1d1d',
+        lineHeight: 20,
+      }}>
+        Você tem cadastros ou edições não enviadas. Conecte-se para sincronizar agora ou modifique aqui a lista de pendências.
+      </Text>
+    </View>
+  </TouchableOpacity>
+) : (
+  /* Card discreto quando tudo está sincronizado */
+  <View style={{
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
+    backgroundColor: '#f0fdf4',
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    borderWidth: 1,
+    borderColor: '#16a34a30',
+  }}>
+    <CheckCircle size={28} weight="fill" color="#16a34a" />
+    <View>
+      <Text style={{ fontSize: 16, fontWeight: '700', color: '#166534' }}>
+        Tudo sincronizado
+      </Text>
+      <Text style={{ fontSize: 14, color: '#166534', opacity: 0.8 }}>
+        Não há ações pendentes
+      </Text>
+    </View>
+  </View>
+)}
+
+{/* Seus 4 minicards normais (Total, Pendentes, etc) */}
+<StatsGrid>
+  <StatCard icon={<Siren size={28} weight="fill" color={styledTheme.danger} />} label="Total" value={stats.total} />
+  
+  <StatCard icon={<WarningCircle size={28} weight="fill" color={styledTheme.danger} />} label="Pendentes" value={stats.pendente} statusFilter="Pendente" />
+  
+  <StatCard icon={<Hourglass size={28} weight="fill" color={styledTheme.info} />} label="Em Andamento" value={stats.andamento} statusFilter="Em andamento" />
+  
+  <StatCard icon={<CheckCircle size={28} weight="fill" color={styledTheme.success} />} label="Concluídas" value={stats.concluidas} statusFilter="Concluída" />
+</StatsGrid>
 
         <Section>
+
           <SectionHeader>
             <SectionTitle>Ocorrências Recentes</SectionTitle>
             <TouchableOpacity onPress={() => router.push("/ocorrencias")}>

@@ -1,3 +1,4 @@
+/* eslint-disable import/no-named-as-default-member */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 // src/screens/NovaOcorrenciaRN.tsx
 import { Ionicons } from "@expo/vector-icons";
@@ -28,6 +29,7 @@ import { KeyboardControllerView } from "react-native-keyboard-controller";
 
 import { useUsuarioLogado } from "@/hooks/useUsuarioLogado";
 import { formatCPF } from "@/utils/formatCpf";
+import NetInfo from '@react-native-community/netinfo';
 import { router } from "expo-router";
 import MapView, { Marker, Region } from "react-native-maps";
 import RNPickerSelect from "react-native-picker-select";
@@ -46,6 +48,8 @@ import {
   postOcorrenciaUsuario,
   postVitima,
 } from "../../services/api";
+import * as cacheService from '../../services/cache';
+import offlineService from '../../services/offline';
 import { cadastrarStyles as styles } from "../../styles/styles";
 import { uploadToCloudinary } from "../../utils/uploadToCloudinary";
 
@@ -57,6 +61,7 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
   const [passoAtual, setPassoAtual] = useState(0);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
   const [assinaturaModal, setAssinaturaModal] = useState(false);
 
   // Dados básicos
@@ -98,6 +103,7 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
   // Anexos
   const [anexos, setAnexos] = useState<Anexo[]>([]);
   const [assinaturaUrl, setAssinaturaUrl] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState<boolean>(true);
 
   // Catálogos
   const [naturezas, setNaturezas] = useState<any[]>([]);
@@ -159,15 +165,38 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
 
   useEffect(() => {
     (async () => {
+      let hadCache = false;
       try {
-        const data = await fetchLesoes();
-        setCondicoesVitima(data || []);
+        const cached = await cacheService.getLesoesCached?.();
+        if (cached) {
+          setCondicoesVitima(cached || []);
+          hadCache = true;
+        }
+      } catch {}
+
+      try {
+        const net = await NetInfo.fetch();
+        if (net.isConnected) {
+          const data = await fetchLesoes();
+          setCondicoesVitima(data || []);
+        } else {
+          // offline and we already attempted cache above
+        }
       } catch (err) {
-        Alert.alert("Erro", "Falha ao carregar condições da vítima");
+        if (!hadCache) {
+          try {
+            const net = await NetInfo.fetch();
+            if (net.isConnected) Alert.alert("Erro", "Falha ao carregar condições da vítima");
+          } catch {
+            // ignore NetInfo errors and fail silently when offline
+          }
+        }
       } finally {
         setLoadingCondicoes(false);
       }
     })();
+    const sub = NetInfo.addEventListener(state => setIsConnected(Boolean(state.isConnected)));
+    return () => sub();
   }, []);
 
   useEffect(() => {
@@ -178,23 +207,62 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
 
   useEffect(() => {
     (async () => {
+      let hadCache = false;
+      let cachedNats: any[] | null = null;
+      let cachedGrps: any[] | null = null;
+      let cachedSubs: any[] | null = null;
+      let cachedViats: any[] | null = null;
+      let cachedUsrs: any[] | null = null;
+      let cachedUnis: any[] | null = null;
+
       try {
-        const [nats, grps, subs, viats, usrs, unis] = await Promise.all([
-          fetchNaturezasOcorrencias(),
-          fetchGruposOcorrencias(),
-          fetchSubgruposOcorrencias(),
-          fetchViaturas(),
-          fetchUsuarios(),
-          fetchUnidadesOperacionais(),
+        [cachedNats, cachedGrps, cachedSubs, cachedViats, cachedUsrs, cachedUnis] = await Promise.all([
+          cacheService.getNaturezasCached?.(),
+          cacheService.getGruposCached?.(),
+          cacheService.getSubgruposCached?.(),
+          cacheService.getViaturasCached?.(),
+          cacheService.getUsuariosCached?.(),
+          cacheService.getUnidadesCached?.(),
         ]);
-        setNaturezas(nats || []);
-        setGrupos(grps || []);
-        setSubgrupos(subs || []);
-        setViaturasList(viats || []);
-        setUsuarios(usrs || []);
-        setUnidades(unis || []);
-      } catch {
-        Alert.alert("Erro", "Falha ao carregar dados");
+
+        if (cachedNats) { setNaturezas(cachedNats || []); hadCache = true; }
+        if (cachedGrps) { setGrupos(cachedGrps || []); hadCache = true; }
+        if (cachedSubs) { setSubgrupos(cachedSubs || []); hadCache = true; }
+        if (cachedViats) { setViaturasList(cachedViats || []); hadCache = true; }
+        if (cachedUsrs) { setUsuarios(cachedUsrs || []); hadCache = true; }
+        if (cachedUnis) { setUnidades(cachedUnis || []); hadCache = true; }
+      } catch {}
+
+      try {
+        const net = await NetInfo.fetch();
+        if (net.isConnected) {
+          const [nats, grps, subs, viats, usrs, unis] = await Promise.all([
+            fetchNaturezasOcorrencias(),
+            fetchGruposOcorrencias(),
+            fetchSubgruposOcorrencias(),
+            fetchViaturas(),
+            fetchUsuarios(),
+            fetchUnidadesOperacionais(),
+          ]);
+
+          setNaturezas(nats || cachedNats || []);
+          setGrupos(grps || cachedGrps || []);
+          setSubgrupos(subs || cachedSubs || []);
+          setViaturasList(viats || cachedViats || []);
+          setUsuarios(usrs || cachedUsrs || []);
+          setUnidades(unis || cachedUnis || []);
+        } else {
+          // offline — keep cache values already set above
+        }
+      } catch (err) {
+        if (!hadCache) {
+          try {
+            const net = await NetInfo.fetch();
+            if (net.isConnected) Alert.alert("Erro", "Falha ao carregar dados");
+          } catch {
+            // ignore
+          }
+        }
       } finally {
         setLoading(false);
       }
@@ -320,13 +388,16 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
         longitudeDelta: 0.01,
       });
 
-      const data = await fetchReverseGeocode(loc.coords.latitude, loc.coords.longitude);
-      if (data?.address) {
-        setMunicipio(data.address.city || data.address.town || data.address.municipality || "");
-        setBairro(data.address.suburb || data.address.neighbourhood || "");
-        setLogradouro(data.address.road || "");
-        setNumero(data.address.house_number || "");
-        setReferencia("");
+      const net = await NetInfo.fetch();
+      if (net.isConnected) {
+        const data = await fetchReverseGeocode(loc.coords.latitude, loc.coords.longitude);
+        if (data?.address) {
+          setMunicipio(data.address.city || data.address.town || data.address.municipality || "");
+          setBairro(data.address.suburb || data.address.neighbourhood || "");
+          setLogradouro(data.address.road || "");
+          setNumero(data.address.house_number || "");
+          setReferencia("");
+        }
       }
     } catch (err) {
       Alert.alert("Erro", "Não foi possível obter a localização.");
@@ -340,6 +411,9 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
       if (!municipio || !bairro || !logradouro || !numero) return;
       const query = `${logradouro}, ${numero}, ${bairro}, ${municipio}, Pernambuco, Brazil`;
       try {
+        const net = await NetInfo.fetch();
+        if (!net.isConnected) return; // skip geocoding while offline
+
         const res = await fetchGeocode(query);
         if (res?.[0]) {
           setLatitude(res[0].lat);
@@ -362,12 +436,15 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
     setLongitude(longitude.toString());
 
     try {
-      const data = await fetchReverseGeocode(latitude, longitude);
-      if (data?.address) {
-        setMunicipio(data.address.city || data.address.town || municipio);
-        setBairro(data.address.suburb || data.address.neighbourhood || bairro);
-        setLogradouro(data.address.road || logradouro);
-        setNumero(data.address.house_number || numero);
+      const net = await NetInfo.fetch();
+      if (net.isConnected) {
+        const data = await fetchReverseGeocode(latitude, longitude);
+        if (data?.address) {
+          setMunicipio(data.address.city || data.address.town || municipio);
+          setBairro(data.address.suburb || data.address.neighbourhood || bairro);
+          setLogradouro(data.address.road || logradouro);
+          setNumero(data.address.house_number || numero);
+        }
       }
     } catch { }
   };
@@ -375,6 +452,9 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
   const enviarOcorrencia = async () => {
     if (sending) return;
     setSending(true);
+    // show a full-screen uploading modal and yield so it can render
+    setShowUploadModal(true);
+    await new Promise(res => setTimeout(res, 50));
 
     if (statusAtendimento === "Não Atendido" && !descricao.trim()) {
       Alert.alert("Campo obrigatório", "Informe o motivo do não atendimento na descrição.");
@@ -446,8 +526,57 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
         anexos: anexosEnviados.length > 0 ? anexosEnviados : null,
       };
 
-      const resp = await postOcorrencia(payload);
-      const ocorrenciaId = resp.id || resp.ocorrenciaId;
+      let ocorrenciaId: any = null;
+      try {
+        const resp = await postOcorrencia(payload);
+        ocorrenciaId = resp.id || resp.ocorrenciaId;
+      } catch (err) {
+        // provavelmente sem conexão: enfileira para sincronizar depois
+        try {
+            // include local anexos and signature so offline processor can upload them later
+            const offlinePayload = {
+              ...payload,
+              vitimas: vitimas.map(v => ({ nome: v.nome, cpf_vitima: v.cpf_vitima, idade: v.idade, sexo: v.sexo, lesaoId: v.lesaoId, destinoVitima: v.destinoVitima, tipoAtendimento: v.tipoAtendimento, observacoes: v.observacoes })),
+              anexos: anexos.map(a => ({ uri: a.uri, name: a.name, type: a.type })),
+              assinaturaDataUrl: assinaturaUrl || null,
+            };
+
+            try {
+              await offlineService.enqueueAction('create', offlinePayload);
+              Alert.alert('Offline', 'Ocorrência salva localmente e será enviada quando houver conexão.');
+              resetForm();
+              setSending(false);
+              router.replace('/');
+              return;
+            } catch (e: any) {
+              // If enqueue failed due to attachments/signature, surface a friendly message
+              if (e && (e.code === 'ATTACHMENTS_NOT_ALLOWED_OFFLINE' || String(e.message).toLowerCase().includes('attach') || String(e.message).toLowerCase().includes('assinatura'))) {
+                Alert.alert('Não permitido offline', 'Anexos ou assinatura não podem ser salvos enquanto estiver offline. Remova os anexos/assinatura ou conecte-se à internet e tente novamente.');
+                setSending(false);
+                return;
+              }
+              throw e;
+            }
+        } catch (e) {
+          console.warn('Erro ao enfileirar ocorrência offline', e);
+          const mensagem = typeof e === 'string'
+            ? e
+            : (e && typeof e === 'object' && 'message' in e && typeof (e as any).message === 'string')
+              ? (e as any).message
+              : String(e ?? '');
+          const mensagemLower = mensagem.toLowerCase();
+          if (mensagemLower.includes('municipio') || mensagemLower.includes('logradouro') || mensagemLower.includes('bairro') || mensagemLower.includes('numero')) {
+            Alert.alert('Não foi possível salvar offline', 'Para salvar offline, preencha Município, Logradouro, Bairro e Número.');
+            setSending(false);
+            // mantém o usuário no formulário para corrigir os campos
+            return;
+          }
+
+          Alert.alert('Erro', 'Não foi possível enfileirar a ocorrência. Tente novamente.');
+          setSending(false);
+          return;
+        }
+      }
 
       if (equipe.length > 0) {
         await Promise.all(equipe.map(id => postOcorrenciaUsuario({ ocorrenciaId, userId: id })));
@@ -476,9 +605,7 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
           text: "OK",
           onPress: () => {
             resetForm();        // ← reseta tudo
-            router.back();      // ← sai da tela (ou use router.replace se quiser forçar reload)
-            // Ou se quiser ficar na mesma tela limpa:
-            // router.replace("/nova-ocorrencia"); // força reload completo (opcional)
+            router.replace('/'); // navega para índice principal
           }
         }
       ]);
@@ -486,6 +613,7 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
       Alert.alert("Erro", err.message || "Falha ao enviar ocorrência");
     } finally {
       setSending(false);
+      setShowUploadModal(false);
     }
   };
 
@@ -818,7 +946,7 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
                   ) : (
                     <View style={{ marginBottom: 20 }}>
                       {vitimas.map((v, i) => (
-                        <View key={v.id} style={styles.vitimaCard}>
+                        <View key={v.id ? String(v.id) : `vitima-${i}`} style={styles.vitimaCard}>
                           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                             <Text style={{ fontWeight: "bold", fontSize: 16 }}>{v.nome || "Sem nome"}</Text>
                             <View style={{ flexDirection: "row", gap: 8 }}>
@@ -997,6 +1125,17 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
                 </View>
               )}
             </KeyboardAvoidingView>
+          </SafeAreaView>
+        </Modal>
+
+        {/* Upload progress modal (prevents black screen while uploading) */}
+        <Modal visible={showUploadModal} animationType="fade" transparent>
+          <SafeAreaView style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' }}>
+            <View style={{ backgroundColor: '#fff', padding: 24, borderRadius: 12, alignItems: 'center', width: '80%' }}>
+              <ActivityIndicator size="large" color="#dc2625" style={{ marginBottom: 12 }} />
+              <Text style={{ fontSize: 16, fontWeight: '700', color: '#111' }}>Enviando ocorrência</Text>
+              <Text style={{ marginTop: 8, color: '#444', textAlign: 'center' }}>Aguarde enquanto os anexos são carregados e a ocorrência é sincronizada.</Text>
+            </View>
           </SafeAreaView>
         </Modal>
 
