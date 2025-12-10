@@ -1,13 +1,30 @@
 import NetInfo from '@react-native-community/netinfo';
+import * as Notifications from 'expo-notifications';
 import { Stack, useRouter, useSegments } from "expo-router";
 import { useEffect, useRef } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, Platform, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import ProcessingOverlay from "../components/ProcessingOverlay";
-import { initAuthToken } from "../services/api";
+import { initAuthToken, salvarPushToken } from "../services/api";
+
+import { useExpoPushToken } from "@/hooks/useExpoPushToken";
+import { useUsuarioLogado } from "@/hooks/useUsuarioLogado";
 import { initCache, syncIfOnline } from "../services/cache";
 import { useAuthStore } from "../store/authStore";
+
 import { ThemeProvider } from "./theme";
+
+// Registrar handler imediatamente (garante comportamento em foreground no iOS)
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
+
 
 export default function RootLayout() {
   const router = useRouter();
@@ -15,6 +32,8 @@ export default function RootLayout() {
   const { token, isLoading } = useAuthStore();
   const init = useAuthStore((s) => s.init);
   const hasInitialized = useRef(false);
+  const expoPushToken = useExpoPushToken();
+  const { id } = useUsuarioLogado();
 
   // 1. Inicialização única
   useEffect(() => {
@@ -55,7 +74,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (isLoading) return;
 
-    const inAuthGroup = segments[0] === "(tabs)" || segments[0] === "configuracoes" || segments[0] === "ocorrencia" || segments[0] === "sincronizacao";
+    const inAuthGroup = segments[0] === "(tabs)" || segments[0] === "configuracoes" || segments[0] === "ocorrencia" || segments[0] === "sincronizacao" || segments[0] === "sobre";
     const inLogin = segments[0] === "login" || (segments as readonly string[]).length === 0;
 
     if (token && !inAuthGroup) {
@@ -64,6 +83,47 @@ export default function RootLayout() {
       router.replace("/login");
     }
   }, [token, isLoading, segments, router]);
+
+  // Envia o push token para o backend quando disponível
+  useEffect(() => {
+    if (!expoPushToken || !id) return;
+
+    const send = async () => {
+      try {
+        console.log('[app] enviando pushToken do layout ->', { id, expoPushToken });
+        await salvarPushToken(id, expoPushToken);
+        console.log('Token salvo no backend (via salvarPushToken)');
+      } catch (err) {
+        console.warn('Erro ao salvar token via salvarPushToken', err);
+      }
+    };
+
+    send();
+  }, [expoPushToken, id]);
+
+  // Configura handler e listeners para debugar notificações (foreground/background)
+  useEffect(() => {
+
+    if (Platform.OS === 'android') {
+      Notifications.setNotificationChannelAsync('default', {
+        name: 'default',
+        importance: Notifications.AndroidImportance.MAX,
+      }).catch(() => {});
+    }
+
+    const receivedSub = Notifications.addNotificationReceivedListener(notification => {
+      console.log('[NOTIF] received:', notification);
+    });
+
+    const responseSub = Notifications.addNotificationResponseReceivedListener(response => {
+      console.log('[NOTIF] response:', response);
+    });
+
+    return () => {
+      try { receivedSub.remove(); } catch {}
+      try { responseSub.remove(); } catch {}
+    };
+  }, []);
 
   // Early return seguro (todos os hooks já foram chamados)
   if (isLoading) {
@@ -87,6 +147,7 @@ export default function RootLayout() {
           <Stack.Screen name="configuracoes" />
           <Stack.Screen name="ocorrencia/[id]" />
           <Stack.Screen name="sincronizacao" />
+          <Stack.Screen name="sobre" />
         </Stack>
         <ProcessingOverlay />
       </ThemeProvider>

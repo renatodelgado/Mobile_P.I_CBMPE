@@ -1,7 +1,7 @@
 import Constants from "expo-constants";
 
 const expoExtra = (Constants.expoConfig && Constants.expoConfig.extra) ||
-  (Constants.manifest && Constants.manifest.extra) || {};
+  (Constants.manifest && (Constants.manifest as any).extra) || {};
 
 const CLOUD_NAME =
   expoExtra?.VITE_CLOUDINARY_CLOUD_NAME || process.env.VITE_CLOUDINARY_CLOUD_NAME;

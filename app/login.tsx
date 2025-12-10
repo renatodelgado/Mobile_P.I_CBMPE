@@ -31,12 +31,15 @@ import {
   Title,
 } from "../styles/Login.styles";
 
+import { useExpoPushToken } from "@/hooks/useExpoPushToken";
 import { Clipboard, Lock } from "phosphor-react-native";
-import { login } from "../services/api";
+import { login, salvarPushToken } from "../services/api";
 import { useAuthStore } from "../store/authStore";
 
 export default function LoginScreen() {
   const router = useRouter();
+
+  const expoPushToken = useExpoPushToken();
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -65,6 +68,17 @@ export default function LoginScreen() {
 
       // CORRETO: passando os 2 parâmetros que o store espera
       useAuthStore.getState().login(token, usuario);
+
+      // Após o login bem-sucedido, tente salvar o pushToken no backend (best-effort)
+      try {
+        const uid = usuario?.id ?? usuario?.usuarioId ?? usuario?.userId;
+        if (uid && expoPushToken) {
+          salvarPushToken(uid, expoPushToken).catch(() => {});
+        }
+      } catch (e) {
+        // não bloquear o fluxo de login
+        console.warn('falha ao enviar pushToken após login', e);
+      }
 
       // O redirecionamento acontece automaticamente no _layout.tsx
       // Mas podemos forçar aqui também (opcional)

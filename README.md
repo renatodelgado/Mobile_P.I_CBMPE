@@ -1,50 +1,160 @@
-# Welcome to your Expo app 👋
+# Chama --- Sistema de Registro de Ocorrências (CBMPE)
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Aplicativo móvel desenvolvido em **React Native + Expo + TypeScript**
+para o **Sistema de Registro, Gestão e Acompanhamento de Ocorrências**
+do\
+**Corpo de Bombeiros Militar de Pernambuco (CBMPE)**.
 
-## Get started
+> Projeto voltado para **operadores em campo**, com suporte a
+> **funcionamento offline** e **sincronização automática** com o
+> backend.
 
-1. Install dependencies
+------------------------------------------------------------------------
 
-   ```bash
-   npm install
-   ```
+## Sobre o Sistema
 
-2. Start the app
+Conheça o propósito, a arquitetura e o time responsável pelo
+desenvolvimento da plataforma.
 
-   ```bash
-   npx expo start
-   ```
+### Visão Geral
 
-In the output, you'll find options to open the app in a
+O sistema foi desenvolvido para o **Corpo de Bombeiros Militar de
+Pernambuco (CBMPE)** com o objetivo de **modernizar o fluxo de registro,
+gestão e acompanhamento de ocorrências**.
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+A plataforma é composta por dois módulos que operam de forma integrada:
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+-   🖥 **Painel Web Administrativo**
+-   📱 **Aplicativo Mobile para Operadores em Campo**
 
-## Get a fresh project
+Ambos compartilham o **mesmo backend**, garantindo integração em tempo
+real entre gestão e operação.
 
-When you're ready, run:
+------------------------------------------------------------------------
 
-```bash
-npm run reset-project
+## Estrutura da Plataforma
+
+### 🖥 Painel Web --- Administrativo
+
+Utilizado por equipes administrativas do CBMPE. Permite:
+
+-   ✅ Cadastro de novas ocorrências
+-   ✅ Gestão e edição de registros
+-   ✅ Dashboard com mapas e heatmaps
+-   ✅ Gestão de usuários e permissões
+
+------------------------------------------------------------------------
+
+### 📱 Aplicativo Mobile --- Operadores em Campo
+
+Desenvolvido para equipes que atuam diretamente nas ocorrências:
+
+-   ✅ Cadastro e edição de ocorrências
+-   ✅ Funcionamento **offline**
+-   ✅ Sincronização automática ao voltar a ficar online
+
+------------------------------------------------------------------------
+
+## Funcionalidades
+
+-   Cadastro e edição de ocorrências
+-   Operação offline
+-   Sincronização automática
+-   Autenticação de usuários
+-   Gestão de permissões (via painel web)
+-   Visualização de mapas e dashboard
+
+------------------------------------------------------------------------
+
+## Tecnologias Utilizadas
+
+-   React + TypeScript (Web)
+-   React Native + Expo (Mobile)
+-   Node.js + Express (Backend)
+-   MySQL + TypeORM (Banco de Dados)
+-   Vercel / Netlify (Deploy Web)
+-   Railway (API + Banco)
+-   Cloudinary (Uploads)
+
+------------------------------------------------------------------------
+
+## Pré-requisitos
+
+-   Node.js (versão LTS recomendada)
+-   Yarn
+-   Expo Go instalado no celular
+-   Emulador Android (opcional)
+
+------------------------------------------------------------------------
+
+## Instalação e Execução
+
+### 1️⃣ Instalar dependências
+
+``` bash
+yarn install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+### 2️⃣ Iniciar o servidor Expo
 
-## Learn more
+``` bash
+yarn expo start --clear
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+### 3️⃣ Executar no celular
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+-   Abra o **Expo Go**
+-   Escaneie o **QR Code** exibido
 
-## Join the community
+✅ O celular e o computador devem estar na **mesma rede Wi-Fi**.
 
-Join our community of developers creating universal apps.
+------------------------------------------------------------------------
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Configuração da API
+
+Edite o arquivo:
+
+    services/api.ts
+
+Exemplo:
+
+``` ts
+baseURL: "http://192.168.0.10:3000"
+```
+
+------------------------------------------------------------------------
+
+## Equipe Desenvolvedora
+
+Projeto desenvolvido pelos estudantes do **Grupo 1 --- Turma 43** da
+**Faculdade Senac Pernambuco**, como **Projeto Integrador do 3º
+período**:
+
+-   João Victor Rodrigues Basante
+-   João Vitor Malveira da Silva
+-   Maria Clara de Melo
+-   Renato Trancoso Branco Delgado
+-   Thayana Anália dos Santos Lira
+-   Vinicius Henrique Silva Nascimento
+
+------------------------------------------------------------------------
+
+## Professores e Disciplinas
+
+-   Coding Mobile --- Prof. Geraldo Júnior (Orientador)
+-   User Experience --- Prof. Marcos Tenório
+-   Backend e Arquitetura --- Prof. Danilo Farias
+-   Comunicação Empresarial --- Prof. Carol Luz
+-   Engenharia de Software --- Prof. Sonia Gomes
+-   Data Science --- Prof. Welton Dionísio
+
+------------------------------------------------------------------------
+
+## Suporte
+
+Em caso de dúvidas ou sugestões de melhoria, consulte a documentação
+interna do projeto ou entre em contato com o time desenvolvedor.
+
+------------------------------------------------------------------------
+
+🔥 **Chama --- Tecnologia a serviço de quem salva vidas.**

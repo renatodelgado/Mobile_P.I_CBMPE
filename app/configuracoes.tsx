@@ -15,6 +15,15 @@ export default function Configuracoes() {
   const { logout } = useAuthStore();
   const [notificacoes, setNotificacoes] = React.useState(true);
 
+  const openSobre = () => {
+    console.log('[configuracoes] abrir sobre');
+    try {
+      router.push('/sobre');
+    } catch (err) {
+      console.warn('[configuracoes] erro ao navegar para sobre', err);
+    }
+  };
+
   const handleLogout = () => {
   Alert.alert(
     "Sair da conta",
@@ -70,6 +79,13 @@ export default function Configuracoes() {
         <RowLeft>
           <Info size={22} color={styledTheme.textSecondary} />
           <LabelText>Manual de uso</LabelText>
+        </RowLeft>
+      </Row>
+
+      <Row onPress={openSobre}>
+        <RowLeft>
+          <Info size={22} color={styledTheme.textSecondary} />
+          <LabelText>Sobre o sistema</LabelText>
         </RowLeft>
       </Row>
 

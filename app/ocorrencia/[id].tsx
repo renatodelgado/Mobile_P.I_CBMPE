@@ -133,6 +133,7 @@ type Ocorrencia = {
   numeroOcorrencia: string;
   dataHoraChamada: string;
   statusAtendimento: string;
+  motivoNaoAtendimento?: string;
   descricao: string;
   formaAcionamento: string;
   naturezaOcorrencia: { id: number; nome: string };
@@ -299,6 +300,7 @@ export default function OcorrenciaDetail() {
               } : undefined,
               viatura: ocData.viatura ? { id: ocData.viatura.id || 0, tipo: ocData.viatura.tipo || "", numero: ocData.viatura.numero || "", placa: ocData.viatura.placa || "" } : undefined,
               anexos: Array.isArray(ocData.anexos) ? ocData.anexos.map((a: any) => ({ id: a.id, urlArquivo: a.urlArquivo || a.uri || a.url || '', nomeArquivo: a.nomeArquivo || a.name || '', tipoArquivo: a.tipoArquivo || a.type || 'imagem' })) : [],
+              motivoNaoAtendimento: ocData.motivoNaoAtendimento ?? ocData.motivo_nao_atendimento ?? ocData.motivo ?? undefined,
             };
 
             setOcorrencia(normalized);
@@ -385,6 +387,7 @@ export default function OcorrenciaDetail() {
                 tipoArquivo: a.tipoArquivo ?? "",
               }))
               : [],
+            motivoNaoAtendimento: (ocData.motivoNaoAtendimento ?? ocData.motivo_nao_atendimento ?? ocData.motivo ?? undefined),
           };
           setOcorrencia(normalized);
 
@@ -497,7 +500,7 @@ export default function OcorrenciaDetail() {
       }
     }
     if (id) load();
-  }, [id]);
+  }, [editingQueueItemId, id, queueItem]);
 
   useEffect(() => {
     if (!ocorrencia) return;
@@ -555,18 +558,61 @@ export default function OcorrenciaDetail() {
   const formatDate = (d: string) =>
     new Date(d).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
-  const getStatus = (s: string) => {
-    switch (s) {
-      case "pendente": return { label: "Pendente", color: "#dc2626", bg: "#FEE2E2", icon: WarningCircle };
-      case "em_andamento": return { label: "Em Andamento", color: "#3b82f6", bg: "#DBEAFE", icon: Hourglass };
-      case "concluida": return { label: "Concluída", color: "#22c55e", bg: "#DCFCE7", icon: CheckCircle };
-      default: return { label: s, color: "#64748b", bg: "#F3F4F6", icon: null };
+  const normalizeStatusString = (s?: string | null): string => {
+    if (!s) return "";
+    try {
+      // lower, remove diacritics, replace underscores/dashes with spaces and collapse whitespace
+      return String(s)
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/\p{Diacritic}/gu, '')
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    } catch (e) {
+      // Fallback for environments without Unicode property escapes
+      return String(s)
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
     }
+  };
+
+  const getStatus = (s?: string | null) => {
+    const n = normalizeStatusString(s);
+    if (!n) return { label: '', color: '#64748b', bg: '#F3F4F6', icon: null };
+
+    // Map many textual variants to semantic statuses
+    if (n.includes('nao atend') || n.includes('nao atendida') || (n.includes('nao') && n.includes('atend')) || n.includes('naoatend')) {
+      return { label: 'Não Atendida', color: '#64748b', bg: '#F3F4F6', icon: X };
+    }
+
+    if (n.includes('atend') || n.includes('conclu') || n.includes('concluida') || n.includes('fech') || n.includes('finaliz')) {
+      return { label: 'Atendida', color: '#22c55e', bg: '#DCFCE7', icon: CheckCircle };
+    }
+
+    if (n.includes('andam') || n.includes('andamento') || n.includes('em andamento')) {
+      return { label: 'Em Andamento', color: '#3b82f6', bg: '#DBEAFE', icon: Hourglass };
+    }
+
+    if (n.includes('pend')) {
+      return { label: 'Pendente', color: '#dc2626', bg: '#FEE2E2', icon: WarningCircle };
+    }
+
+    // Fallback: show original string capitalized-ish
+    const orig = String(s || '').trim();
+    return { label: orig || 'Desconhecido', color: '#64748b', bg: '#F3F4F6', icon: null };
   };
 
   const status = ocorrencia ? getStatus(ocorrencia.statusAtendimento) : null;
 
-  const isConcluida = ocorrencia?.statusAtendimento === "concluida";
+  const _normalizedStatus = normalizeStatusString(ocorrencia?.statusAtendimento);
+  // Não considerar 'atendida' quando a string contém 'nao' (p.ex. 'nao_atendida', 'não atendida')
+  const isNaoAtendida = _normalizedStatus ? ((_normalizedStatus.includes('nao') && _normalizedStatus.includes('atend')) || _normalizedStatus.includes('naoatend')) : false;
+  const isAtendida = _normalizedStatus ? (( !_normalizedStatus.includes('nao') ) && (_normalizedStatus.includes('atend') || _normalizedStatus.includes('conclu') || _normalizedStatus.includes('fech') || _normalizedStatus.includes('finaliz'))) : false;
 
   const usarMinhaLocalizacao = async () => {
     setGettingLocation(true);
@@ -616,14 +662,14 @@ export default function OcorrenciaDetail() {
     }));
   };
 
-  const handleMarcarConcluida = () => {
+  const handleMarcarAtendida = () => {
     Alert.alert(
-      "Concluir ocorrência",
-      "Você está prestes a concluir esta ocorrência. Após isso ela será fechada e não poderá mais ser editada.\n\nDeseja continuar?",
+      "Marcar como atendida",
+      "Você está prestes a marcar esta ocorrência como atendida. Após isso ela será fechada e não poderá mais ser editada.\n\nDeseja continuar?",
       [
         { text: "Cancelar", style: "cancel" },
         {
-          text: "Sim, concluir",
+          text: "Sim, marcar",
           style: "destructive",
           onPress: async () => {
             if (concluding) return;
@@ -631,57 +677,57 @@ export default function OcorrenciaDetail() {
               // verify connectivity before attempting to mark as concluded
               const net = await NetInfo.fetch().catch(() => ({ isConnected: false }));
               if (!net || !net.isConnected) {
-                  // Enfileira a conclusão para processamento quando houver conexão
+                // Enfileira a conclusão para processamento quando houver conexão
+                try {
+                  setConcluding(true);
+                  const payloadForQueue = { id: Number(id), statusAtendimento: 'atendida' };
+                  await offlineService.enqueueAction('update', payloadForQueue);
+
+                  // Atualiza caches locais para refletir imediatamente o estado concluído
                   try {
-                    setConcluding(true);
-                    const payloadForQueue = { id: Number(id), statusAtendimento: 'concluida' };
-                    await offlineService.enqueueAction('update', payloadForQueue);
+                    const keyGen = '@app:cache:ocorrencias_v1';
+                    const rawGen = await AsyncStorage.getItem(keyGen);
+                    const arrGen = rawGen ? (JSON.parse(rawGen).data || []) : [];
+                    const replacedGen = arrGen.map((o: any) => (String(o.id) === String(id) ? { ...(o || {}), statusAtendimento: 'concluida' } : o));
+                    const existsGen = replacedGen.find((o: any) => String(o.id) === String(id));
+                    const finalGen = existsGen ? replacedGen : [{ id: Number(id), statusAtendimento: 'atendida', numeroOcorrencia: ocorrencia?.numeroOcorrencia || null }, ...replacedGen];
+                    await AsyncStorage.setItem(keyGen, JSON.stringify({ updatedAt: Date.now(), data: finalGen }));
+                  } catch (e) { }
 
-                    // Atualiza caches locais para refletir imediatamente o estado concluído
-                    try {
-                      const keyGen = '@app:cache:ocorrencias_v1';
-                      const rawGen = await AsyncStorage.getItem(keyGen);
-                      const arrGen = rawGen ? (JSON.parse(rawGen).data || []) : [];
-                      const replacedGen = arrGen.map((o: any) => (String(o.id) === String(id) ? { ...(o || {}), statusAtendimento: 'concluida' } : o));
-                      const existsGen = replacedGen.find((o: any) => String(o.id) === String(id));
-                      const finalGen = existsGen ? replacedGen : [{ id: Number(id), statusAtendimento: 'concluida', numeroOcorrencia: ocorrencia?.numeroOcorrencia || null }, ...replacedGen];
-                      await AsyncStorage.setItem(keyGen, JSON.stringify({ updatedAt: Date.now(), data: finalGen }));
-                    } catch (e) {}
+                  try {
+                    const userId = ocorrencia?.usuario?.id || usuarioLogado?.id || null;
+                    if (userId) {
+                      const key = `@app:cache:ocorrencias_usuario_v1_${userId}`;
+                      const raw = await AsyncStorage.getItem(key);
+                      const arr = raw ? (JSON.parse(raw).data || []) : [];
+                      const replaced = arr.map((o: any) => (String(o.id) === String(id) ? { ...(o || {}), statusAtendimento: 'concluida' } : o));
+                      const exists = replaced.find((o: any) => String(o.id) === String(id));
+                      const finalArr = exists ? replaced : [{ id: Number(id), statusAtendimento: 'concluida', numeroOcorrencia: ocorrencia?.numeroOcorrencia || null }, ...replaced];
+                      await AsyncStorage.setItem(key, JSON.stringify({ updatedAt: Date.now(), data: finalArr }));
+                    }
+                  } catch (e) { }
 
-                    try {
-                      const userId = ocorrencia?.usuario?.id || usuarioLogado?.id || null;
-                      if (userId) {
-                        const key = `@app:cache:ocorrencias_usuario_v1_${userId}`;
-                        const raw = await AsyncStorage.getItem(key);
-                        const arr = raw ? (JSON.parse(raw).data || []) : [];
-                        const replaced = arr.map((o: any) => (String(o.id) === String(id) ? { ...(o || {}), statusAtendimento: 'concluida' } : o));
-                        const exists = replaced.find((o: any) => String(o.id) === String(id));
-                        const finalArr = exists ? replaced : [{ id: Number(id), statusAtendimento: 'concluida', numeroOcorrencia: ocorrencia?.numeroOcorrencia || null }, ...replaced];
-                        await AsyncStorage.setItem(key, JSON.stringify({ updatedAt: Date.now(), data: finalArr }));
-                      }
-                    } catch (e) {}
-
-                    // Atualiza o estado local para refletir a conclusão imediatamente
-                    setOcorrencia(prev => prev ? { ...prev, statusAtendimento: 'concluida' } : prev);
-                    Alert.alert('Offline', 'Ocorrência marcada como concluída localmente e será sincronizada quando houver conexão.');
-                  } catch (e) {
-                    console.warn('Erro ao enfileirar conclusão offline', e);
-                    Alert.alert('Erro', 'Não foi possível marcar como concluída offline. Tente novamente.');
-                  } finally {
-                    setConcluding(false);
-                  }
-                  return;
+                  // Atualiza o estado local para refletir a conclusão imediatamente
+                  setOcorrencia(prev => prev ? { ...prev, statusAtendimento: 'concluida' } : prev);
+                  Alert.alert('Offline', 'Ocorrência marcada como concluída localmente e será sincronizada quando houver conexão.');
+                } catch (e) {
+                  console.warn('Erro ao enfileirar conclusão offline', e);
+                  Alert.alert('Erro', 'Não foi possível marcar como concluída offline. Tente novamente.');
+                } finally {
+                  setConcluding(false);
                 }
+                return;
+              }
 
-                setConcluding(true);
-                await putOcorrencia(Number(id), { statusAtendimento: "concluida" });
-                const oc = await getOcorrenciaPorId(id);
-                setOcorrencia(oc as any);
-                setEditMode(false);
-                Alert.alert("Sucesso", "Ocorrência marcada como concluída.");
+              setConcluding(true);
+              await putOcorrencia(Number(id), { statusAtendimento: "concluida" });
+              const oc = await getOcorrenciaPorId(id);
+              setOcorrencia(oc as any);
+              setEditMode(false);
+              Alert.alert("Sucesso", "Ocorrência marcada como atendida.");
             } catch (err) {
-              console.error("Erro ao marcar como concluída:", err);
-              Alert.alert("Erro", "Não foi possível marcar a ocorrência como concluída.");
+              console.error("Erro ao marcar como atendida:", err);
+              Alert.alert("Erro", "Não foi possível marcar a ocorrência como atendida.");
             } finally {
               setConcluding(false);
             }
@@ -743,7 +789,7 @@ export default function OcorrenciaDetail() {
             const existsGen = replacedGen.find((o: any) => String(o.id) === String(payloadForQueue.id));
             const finalGen = existsGen ? replacedGen : [{ ...payloadForQueue, numeroOcorrencia: ocorrencia?.numeroOcorrencia || null }, ...replacedGen];
             await AsyncStorage.setItem(keyGen, JSON.stringify({ updatedAt: Date.now(), data: finalGen }));
-          } catch (e) {}
+          } catch (e) { }
           try {
             const userId = ocorrencia?.usuario?.id || usuarioLogado?.id || null;
             if (userId) {
@@ -755,7 +801,7 @@ export default function OcorrenciaDetail() {
               const finalArr = exists ? replaced : [{ ...payloadForQueue, numeroOcorrencia: ocorrencia?.numeroOcorrencia || null }, ...replaced];
               await AsyncStorage.setItem(key, JSON.stringify({ updatedAt: Date.now(), data: finalArr }));
             }
-          } catch (e) {}
+          } catch (e) { }
           Alert.alert('Salvo localmente', 'As alterações foram salvas na fila e serão enviadas quando possível.');
           setSaving(false);
           setEditMode(false);
@@ -783,7 +829,7 @@ export default function OcorrenciaDetail() {
             const existsGen = replacedGen.find((o: any) => String(o.id) === String(id));
             const finalGen = existsGen ? replacedGen : [{ ...payloadForQueue, numeroOcorrencia: ocorrencia?.numeroOcorrencia || null }, ...replacedGen];
             await AsyncStorage.setItem(keyGen, JSON.stringify({ updatedAt: Date.now(), data: finalGen }));
-          } catch (e) {}
+          } catch (e) { }
           try {
             const userId = ocorrencia?.usuario?.id || usuarioLogado?.id || null;
             if (userId) {
@@ -795,7 +841,7 @@ export default function OcorrenciaDetail() {
               const finalArr = exists ? replaced : [{ ...payloadForQueue, numeroOcorrencia: ocorrencia?.numeroOcorrencia || null }, ...replaced];
               await AsyncStorage.setItem(key, JSON.stringify({ updatedAt: Date.now(), data: finalArr }));
             }
-          } catch (e) {}
+          } catch (e) { }
           Alert.alert('Offline', 'Edição salva localmente e será sincronizada quando houver conexão.');
           setSaving(false);
           setEditMode(false);
@@ -1051,7 +1097,9 @@ export default function OcorrenciaDetail() {
           <TouchableOpacity onPress={handleSave} disabled={saving}>
             {saving ? <ActivityIndicator color="#22c55e" /> : <Check size={28} color="#22c55e" weight="bold" />}
           </TouchableOpacity>
-        ) : isConcluida ? (
+        ) : isAtendida ? (
+          <View style={{ width: 36, height: 36 }} />
+        ) : isNaoAtendida ? (
           <View style={{ width: 36, height: 36 }} />
         ) : (
           <TouchableOpacity onPress={() => setEditMode(true)}>
@@ -1073,7 +1121,7 @@ export default function OcorrenciaDetail() {
                 </StatusCard>
 
                 {/* Aviso para ocorrência concluída */}
-                {isConcluida && (
+                {isAtendida && (
                   <View style={{
                     backgroundColor: "#FEF3C7",
                     padding: 12,
@@ -1087,23 +1135,48 @@ export default function OcorrenciaDetail() {
                   }}>
                     <WarningCircle size={24} color="#D97706" weight="fill" />
                     <Text style={{ color: "#92400E", fontWeight: "600", flex: 1 }}>
-                      Esta ocorrência foi concluída e não pode mais ser editada.
+                      Esta ocorrência foi marcada como Atendida e não pode mais ser editada.
                     </Text>
                   </View>
                 )}
 
-                {/* Botão para marcar como concluída (quando aplicável) */}
-                {ocorrencia?.statusAtendimento !== "concluida" && ocorrencia?.statusAtendimento !== "nao_atendido" && (
+                {isNaoAtendida && (
+                  <View style={{
+                    backgroundColor: "#FEF3C7",
+                    padding: 12,
+                    borderRadius: 10,
+                    marginTop: 12,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 10,
+                    borderWidth: 1,
+                    borderColor: "#FDBA74"
+                  }}>
+                    <WarningCircle size={24} color="#D97706" weight="fill" />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: "#92400E", fontWeight: "600" }}>
+                        Esta ocorrência foi marcada como Não Atendida e não pode mais ser editada.
+                      </Text>
+                      <Text style={{ color: "#92400E", marginTop: 6 }}>
+                          <Text style={{ fontWeight: "700" }}>Motivo do Não Atendimento: </Text>
+                          {String(ocorrencia.motivoNaoAtendimento)}
+                        </Text>
+                    </View>
+                  </View>
+                )}
+
+                {/* Show when not already marked as 'Atendida' and not explicitly 'Não Atendida' */}
+                {(!isAtendida && !isNaoAtendida) && (
                   <View style={{ marginTop: 12 }}>
                     <TouchableOpacity
                       style={[cadastrarStyles.botaoVermelho, { alignItems: 'center' }]}
-                      onPress={handleMarcarConcluida}
+                      onPress={handleMarcarAtendida}
                       disabled={concluding}
                     >
                       {concluding ? (
                         <ActivityIndicator color="#fff" />
                       ) : (
-                        <Text style={cadastrarStyles.botaoTexto}>Marcar como concluída</Text>
+                        <Text style={cadastrarStyles.botaoTexto}>Marcar como atendida</Text>
                       )}
                     </TouchableOpacity>
                   </View>
@@ -1649,27 +1722,27 @@ export default function OcorrenciaDetail() {
                         <TouchableOpacity
                           onPress={() => {
                             // Garante que todos os campos, inclusive condicaoNome, sejam preenchidos corretamente
-                                                          const rawLesaoId = v.lesaoId;
-                                                          // Evita comparar number com string: trate explicitamente os tipos possíveis
-                                                          let lesaoIdNum: number | undefined;
-                                                          if (rawLesaoId === null || rawLesaoId === undefined) {
-                                                            lesaoIdNum = undefined;
-                                                          } else if (typeof rawLesaoId === "number") {
-                                                            lesaoIdNum = rawLesaoId;
-                                                          } else {
-                                                            // Qualquer valor inesperado (por exemplo string) é convertido de forma segura
-                                                            const s = String(rawLesaoId).trim();
-                                                            lesaoIdNum = s !== "" && !isNaN(Number(s)) ? Number(s) : undefined;
-                                                          }
-                                                          const vitimaCompleta = {
-                                                            ...v,
-                                                            // Força o tipoAtendimento (às vezes vem como tipo_atendimento)
-                                                            tipoAtendimento: v.tipoAtendimento || "",
-                                                            // Garante que o condicaoNome venha do lesao, mesmo se estiver em camelCase ou quando lesaoId for string
-                                                            condicaoNome: v.condicaoNome || (lesaoIdNum ? condicoesVitima.find(c => Number(c.id) === lesaoIdNum)?.tipoLesao : undefined),
-                                                            // Garante que lesaoId esteja presente como number | undefined
-                                                            lesaoId: lesaoIdNum,
-                                                          };
+                            const rawLesaoId = v.lesaoId;
+                            // Evita comparar number com string: trate explicitamente os tipos possíveis
+                            let lesaoIdNum: number | undefined;
+                            if (rawLesaoId === null || rawLesaoId === undefined) {
+                              lesaoIdNum = undefined;
+                            } else if (typeof rawLesaoId === "number") {
+                              lesaoIdNum = rawLesaoId;
+                            } else {
+                              // Qualquer valor inesperado (por exemplo string) é convertido de forma segura
+                              const s = String(rawLesaoId).trim();
+                              lesaoIdNum = s !== "" && !isNaN(Number(s)) ? Number(s) : undefined;
+                            }
+                            const vitimaCompleta = {
+                              ...v,
+                              // Força o tipoAtendimento (às vezes vem como tipo_atendimento)
+                              tipoAtendimento: v.tipoAtendimento || "",
+                              // Garante que o condicaoNome venha do lesao, mesmo se estiver em camelCase ou quando lesaoId for string
+                              condicaoNome: v.condicaoNome || (lesaoIdNum ? condicoesVitima.find(c => Number(c.id) === lesaoIdNum)?.tipoLesao : undefined),
+                              // Garante que lesaoId esteja presente como number | undefined
+                              lesaoId: lesaoIdNum,
+                            };
                             setVitimaEmEdicao(vitimaCompleta);
                             setModalVitimaVisible(true);
                           }}

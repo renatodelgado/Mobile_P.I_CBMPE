@@ -4,7 +4,8 @@
 import NetInfo from '@react-native-community/netinfo';
 import { Link, useRouter } from "expo-router";
 import {
-  Calendar, Car, CheckCircle, Gear, Hourglass, MapPin, Siren, Users, WarningCircle
+  Calendar, Car, CheckCircle, Gear, Hourglass, MapPin, Siren, Users, WarningCircle,
+  X
 } from "phosphor-react-native";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -21,8 +22,11 @@ import {
   InfoRow, InfoText, LoaderContainer,
   OcorrenciaCard, OcorrenciaFooter, OcorrenciaHeader, OcorrenciaId, OcorrenciaInfo,
   RowLeft,
-  Scroll, Section, SectionHeader, SectionTitle, StatIcon, StatLabel, StatsGrid,
-  StatusText, StatValue, StyledStatCard, Subtitle, VerTodas
+  Scroll, Section, SectionHeader, SectionTitle,
+  SlimStatBar,
+  StatIcon, StatLabel, StatsGrid,
+  StatusText, StatValue, StyledStatCard,
+  Subtitle, VerTodas
 } from "../../styles/styles";
 
 
@@ -78,7 +82,7 @@ export default function Dashboard() {
         const status =
           statusRaw === "pendente" ? "Pendente" :
             statusRaw.includes("andamento") ? "Em andamento" :
-              statusRaw === "concluida" || statusRaw === "concluída" ? "Concluída" :
+              statusRaw === "atendida" ? "Atendida" :
                 "Não Atendida";
 
         const descCurta = o.descricao
@@ -113,7 +117,7 @@ export default function Dashboard() {
 
       try {
         // suppressed index debug logs
-      } catch {}
+      } catch { }
 
       setOcorrencias(mapped);
     } catch (err) {
@@ -134,17 +138,17 @@ export default function Dashboard() {
     offlineService.getQueueLength().then(n => { if (mounted) setPendingSyncs(n); });
 
     // process once at start
-    offlineService.processQueue().catch(() => {});
+    offlineService.processQueue().catch(() => { });
 
     const interval = setInterval(() => {
-      offlineService.processQueue().catch(() => {});
+      offlineService.processQueue().catch(() => { });
       offlineService.getQueueLength().then(n => { if (mounted) setPendingSyncs(n); });
     }, 20000);
 
     // NetInfo listener: on connect, try sync immediately
     const netUnsub = NetInfo.addEventListener(state => {
       if (state.isConnected) {
-        offlineService.processQueue().catch(() => {});
+        offlineService.processQueue().catch(() => { });
       }
     });
 
@@ -155,8 +159,9 @@ export default function Dashboard() {
     const total = ocorrencias.length;
     const pendente = ocorrencias.filter(o => o.status === "Pendente").length;
     const andamento = ocorrencias.filter(o => o.status === "Em andamento").length;
-    const concluidas = ocorrencias.filter(o => o.status === "Concluída").length;
-    return { total, pendente, andamento, concluidas };
+    const atendidas = ocorrencias.filter(o => o.status === "Atendida").length;
+    const naoAtendidas = ocorrencias.filter(o => o.status === "Não Atendida").length;
+    return { total, pendente, andamento, atendidas, naoAtendidas };
   }, [ocorrencias]);
 
   const StatCard = ({ icon, label, value, color, statusFilter }: any) => (
@@ -209,92 +214,99 @@ export default function Dashboard() {
         }}
       >
         {pendingSyncs > 0 ? (
-  <TouchableOpacity
-    activeOpacity={0.95}
-    onPress={() => router.push('/sincronizacao')}
-    style={{
-      marginHorizontal: 16,
-      marginTop: 16,
-      marginBottom: 8,
-      backgroundColor: '#fee2e2',
-      borderRadius: 16,
-      padding: 20,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 16,
-      borderWidth: 1.5,
-      borderColor: '#dc2626',
-      shadowColor: '#dc2626',
-      shadowOpacity: 0.15,
-      shadowRadius: 12,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: 8,
-    }}
-  >
-    <View style={{
-      backgroundColor: '#dc2626',
-      padding: 14,
-      borderRadius: 50,
-      alignSelf: 'flex-start',
-    }}>
-      <WarningCircle size={32} weight="fill" color="#fff" />
-    </View>
+          <TouchableOpacity
+            activeOpacity={0.95}
+            onPress={() => router.push('/sincronizacao')}
+            style={{
+              marginHorizontal: 16,
+              marginTop: 16,
+              marginBottom: 8,
+              backgroundColor: '#fee2e2',
+              borderRadius: 16,
+              padding: 20,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 16,
+              borderWidth: 1.5,
+              borderColor: '#dc2626',
+              shadowColor: '#dc2626',
+              shadowOpacity: 0.15,
+              shadowRadius: 12,
+              shadowOffset: { width: 0, height: 6 },
+              elevation: 8,
+            }}
+          >
+            <View style={{
+              backgroundColor: '#dc2626',
+              padding: 14,
+              borderRadius: 50,
+              alignSelf: 'flex-start',
+            }}>
+              <WarningCircle size={32} weight="fill" color="#fff" />
+            </View>
 
-    <View style={{ flex: 1 }}>
-      <Text style={{
-        fontSize: 18,
-        fontWeight: '800',
-        color: '#991b1b',
-        marginBottom: 4,
-      }}>
-        Atenção: {pendingSyncs} {pendingSyncs > 1 ? 'ações' : 'ação'} pendente{pendingSyncs > 1 ? 's' : ''}
-      </Text>
-      <Text style={{
-        fontSize: 15,
-        color: '#7f1d1d',
-        lineHeight: 20,
-      }}>
-        Você tem cadastros ou edições não enviadas. Conecte-se para sincronizar agora ou modifique aqui a lista de pendências.
-      </Text>
-    </View>
-  </TouchableOpacity>
-) : (
-  /* Card discreto quando tudo está sincronizado */
-  <View style={{
-    marginHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 8,
-    backgroundColor: '#f0fdf4',
-    borderRadius: 16,
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    borderWidth: 1,
-    borderColor: '#16a34a30',
-  }}>
-    <CheckCircle size={28} weight="fill" color="#16a34a" />
-    <View>
-      <Text style={{ fontSize: 16, fontWeight: '700', color: '#166534' }}>
-        Tudo sincronizado
-      </Text>
-      <Text style={{ fontSize: 14, color: '#166534', opacity: 0.8 }}>
-        Não há ações pendentes
-      </Text>
-    </View>
-  </View>
-)}
+            <View style={{ flex: 1 }}>
+              <Text style={{
+                fontSize: 18,
+                fontWeight: '800',
+                color: '#991b1b',
+                marginBottom: 4,
+              }}>
+                Atenção: {pendingSyncs} {pendingSyncs > 1 ? 'ações' : 'ação'} pendente{pendingSyncs > 1 ? 's' : ''}
+              </Text>
+              <Text style={{
+                fontSize: 15,
+                color: '#7f1d1d',
+                lineHeight: 20,
+              }}>
+                Você tem cadastros ou edições não enviadas. Conecte-se para sincronizar agora ou modifique aqui a lista de pendências.
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ) : (
+          /* Card discreto quando tudo está sincronizado */
+          <View style={{
+            marginHorizontal: 16,
+            marginTop: 16,
+            marginBottom: 8,
+            backgroundColor: '#f0fdf4',
+            borderRadius: 16,
+            padding: 16,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 14,
+            borderWidth: 1,
+            borderColor: '#16a34a30',
+          }}>
+            <CheckCircle size={28} weight="fill" color="#16a34a" />
+            <View>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: '#166534' }}>
+                Tudo sincronizado
+              </Text>
+              <Text style={{ fontSize: 14, color: '#166534', opacity: 0.8 }}>
+                Não há ações pendentes
+              </Text>
+            </View>
+          </View>
+        )}
 
-{/* Seus 4 minicards normais (Total, Pendentes, etc) */}
-<StatsGrid>
-  <StatCard icon={<Siren size={28} weight="fill" color={styledTheme.danger} />} label="Total" value={stats.total} />
-  
-  <StatCard icon={<WarningCircle size={28} weight="fill" color={styledTheme.danger} />} label="Pendentes" value={stats.pendente} statusFilter="Pendente" />
-  
-  <StatCard icon={<Hourglass size={28} weight="fill" color={styledTheme.info} />} label="Em Andamento" value={stats.andamento} statusFilter="Em andamento" />
-  
-  <StatCard icon={<CheckCircle size={28} weight="fill" color={styledTheme.success} />} label="Concluídas" value={stats.concluidas} statusFilter="Concluída" />
-</StatsGrid>
+        {/* Seus minicards normais (Total, Pendentes, etc) */}
+        <StatsGrid>
+          <SlimStatBar onPress={() => router.push("/ocorrencias")}>
+            <RowLeft>
+              <Siren size={22} weight="fill" color={styledTheme.danger} />
+              <Text style={{ marginLeft: 12, fontSize: 16, fontWeight: '700', color: styledTheme.textPrimary }}>Total de Ocorrências</Text>
+            </RowLeft>
+            <StatValue style={{ fontSize: 26 }}>{stats.total}</StatValue>
+          </SlimStatBar>
+          <StatCard icon={<WarningCircle size={28} weight="fill" color={styledTheme.danger} />} label="Pendentes" value={stats.pendente} statusFilter="Pendente" />
+
+          <StatCard icon={<Hourglass size={28} weight="fill" color={styledTheme.info} />} label="Em Andamento" value={stats.andamento} statusFilter="Em andamento" />
+
+          <StatCard icon={<CheckCircle size={28} weight="fill" color={styledTheme.success} />} label="Atendidas" value={stats.atendidas} statusFilter="Atendida" />
+
+          <StatCard icon={<X size={28} weight="fill" color={styledTheme.muted} />} label="Não Atendidas" value={stats.naoAtendidas} statusFilter="Não Atendida" />
+        </StatsGrid>
 
         <Section>
 
@@ -358,7 +370,8 @@ export default function Dashboard() {
                         </View>
                         {item.status === "Pendente" && <WarningCircle size={22} weight="fill" color="#EF4444" />}
                         {item.status === "Em andamento" && <Hourglass size={22} weight="fill" color="#3B82F6" />}
-                        {item.status === "Concluída" && <CheckCircle size={22} weight="fill" color="#10B981" />}
+                        {item.status === "Não Atendida" && <X size={22} weight="fill" color="#6B7280" />}
+                        {item.status === "Atendida" && <CheckCircle size={22} weight="fill" color="#10B981" />}
                       </OcorrenciaHeader>
 
                       <OcorrenciaInfo>
@@ -379,8 +392,11 @@ export default function Dashboard() {
                           <DateText>{item.data} • {item.hora}</DateText>
                         </DateContainer>
                         <StatusText style={{
-                          color: item.status === "Pendente" ? styledTheme.danger :
-                            item.status === "Em andamento" ? styledTheme.info : styledTheme.success,
+                          color:
+                            item.status === "Pendente" ? styledTheme.danger :
+                              item.status === "Em andamento" ? styledTheme.info :
+                                item.status === "Não Atendida" ? styledTheme.muted :
+                                  styledTheme.success,
                           fontWeight: "700"
                         }}>
                           {item.status}

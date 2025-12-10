@@ -57,6 +57,35 @@ export const StyledStatCard = styledNative.TouchableOpacity<{ bg?: string }>`
   shadow-radius: 8px;
 `;
 
+export const StyledStatCardTotal = styledNative.TouchableOpacity<{ bg?: string }>`
+  width: ${width - 32}px;
+  padding: 16px;
+  background-color: ${(props: any) => props.bg || props.theme.surface};
+  border-radius: 16px;
+  margin-bottom: 12px;
+  elevation: 2;
+  shadow-color: #000;
+  shadow-opacity: 0.05;
+  shadow-radius: 8px;
+`;
+
+// Slim variant used as a thin bar above the other stat cards
+export const SlimStatBar = styledNative.TouchableOpacity<{ bg?: string }>`
+  width: ${width - 32}px;
+  padding-vertical: 8px;
+  padding-horizontal: 14px;
+  background-color: ${(props: any) => props.bg || props.theme.surface};
+  border-radius: 12px;
+  margin-bottom: 10px;
+  elevation: 2;
+  shadow-color: #000;
+  shadow-opacity: 0.05;
+  shadow-radius: 6px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+`;
+
 export const StatsGrid = styledNative.View`
   flex-direction: row;
   flex-wrap: wrap;

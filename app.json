@@ -2,6 +2,7 @@
   "expo": {
     "name": "chama-rn",
     "slug": "chama-rn",
+    "projectId": "ae1c788a-9a34-4b61-ada5-ab7f47b56a3a",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -40,11 +41,27 @@
             "backgroundColor": "#000000"
           }
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "/assets/images/icon.png",
+          "color": "#dc2625"
+        }
       ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "VITE_CLOUDINARY_CLOUD_NAME": "dq4ges0mc",
+      "VITE_CLOUDINARY_UPLOAD_PRESET": "ocorrencias_upload",
+      "VITE_CLOUDINARY_API_KEY": "413128759995549",
+      "router": {},
+      "eas": {
+        "projectId": "ae1c788a-9a34-4b61-ada5-ab7f47b56a3a"
+      }
     }
   }
 }

@@ -61,7 +61,7 @@ type Ocorrencia = {
   natureza: string;
   localizacao: string;
   viatura: string;
-  status: "Pendente" | "Em andamento" | "Concluída" | "Não Atendida";
+  status: "Pendente" | "Em andamento" | "Atendida" | "Não Atendida";
   descricao: string;
   isEquipe: boolean;
   isCriadaPorMim: boolean;
@@ -102,7 +102,7 @@ export default function MinhasOcorrencias() {
   const [filtroBusca, setFiltroBusca] = useState("");
   const [filtroNatureza, setFiltroNatureza] = useState("");
   const [filtroViatura, setFiltroViatura] = useState("");
-   const [filtroStatus, setFiltroStatus] = useState<string[]>(["Pendente", "Em andamento", "Concluída", "Não Atendida"]);
+   const [filtroStatus, setFiltroStatus] = useState<string[]>(["Pendente", "Em andamento", "Atendida", "Não Atendida"]);
 
   // Unified picker state (fixes iOS layering and duplicated pickers)
   const [showPicker, setShowPicker] = useState(false);
@@ -165,7 +165,7 @@ const [filtroFim, setFiltroFim] = useState<Date | null>(null);
   const titulo = status
     ? status === "Pendente" ? "Ocorrências Pendentes"
       : status === "Em andamento" ? "Em Andamento"
-        : status === "Concluída" ? "Concluídas"
+        : status === "Atendida" ? "Atendidas"
           : "Minhas Ocorrências"
     : activeTab === "todas" ? "Todas as Ocorrências"
       : activeTab === "criadas" ? "Criadas por Mim"
@@ -187,8 +187,9 @@ const [filtroFim, setFiltroFim] = useState<Date | null>(null);
         const status =
           statusRaw === "pendente" ? "Pendente" :
             statusRaw.includes("andamento") ? "Em andamento" :
-              statusRaw === "concluida" || statusRaw === "concluída" ? "Concluída" :
-                statusRaw === "nao_atendido" ? "Não Atendida" :
+              statusRaw === "atendida" ? "Atendida" :
+                statusRaw.includes("não") ? "Não Atendida" :
+                  statusRaw.includes("nao") ? "Não Atendida" :
                   "Desconhecido";
 
         const criadoPorMim = o.usuario?.id === usuarioLogadoId;
@@ -291,20 +292,21 @@ const [filtroFim, setFiltroFim] = useState<Date | null>(null);
     setFiltroViatura("");
     setFiltroInicio(null);
     setFiltroFim(null);
-    setFiltroStatus(["Pendente", "Em andamento", "Concluída", "Não Atendida"]);
+    setFiltroStatus(["Pendente", "Em andamento", "Atendida", "Não Atendida"]);
   };
 
   const getStatusIcon = (s: string) => {
     switch (s) {
       case "Pendente": return <WarningCircle size={22} weight="fill" color={styledTheme.danger} />;
       case "Em andamento": return <Hourglass size={22} weight="fill" color={styledTheme.info} />;
-      case "Concluída": return <CheckCircle size={22} weight="fill" color={styledTheme.success} />;
+      case "Atendida": return <CheckCircle size={22} weight="fill" color={styledTheme.success} />;
+      case "Não Atendida": return <X size={22} weight="fill" color={styledTheme.muted} />;
       default: return null;
     }
   };
 
   const getStatusColor = (s: string) =>
-    s === "Pendente" ? styledTheme.danger : s === "Em andamento" ? styledTheme.info : styledTheme.success;
+    s === "Pendente" ? styledTheme.danger : s === "Não Atendida" ? styledTheme.muted : s === "Em andamento" ? styledTheme.info : styledTheme.success;
 
   // Open picker helper
 const openPicker = (target: "inicio" | "fim") => {
@@ -623,7 +625,7 @@ const openPicker = (target: "inicio" | "fim") => {
               {/* Status */}
               <View style={{ marginBottom: 24 }}>
                 <Text style={{ fontSize: 14, fontWeight: "600", color: styledTheme.textSecondary, marginBottom: 10 }}>Status</Text>
-                {["Pendente", "Em andamento", "Concluída", "Não Atendida"].map((s) => (
+                {["Pendente", "Em andamento", "Atendida", "Não Atendida"].map((s) => (
                   <TouchableOpacity
                     key={s}
                     onPress={() => {

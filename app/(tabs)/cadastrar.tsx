@@ -70,6 +70,7 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [statusAtendimento, setStatusAtendimento] = useState("Pendente");
   const [descricao, setDescricao] = useState("");
+  const [motivoNaoAtendimento, setMotivoNaoAtendimento] = useState("");
 
   // Natureza
   const [natureza, setNatureza] = useState<string | null>(null);
@@ -116,8 +117,8 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
   const statusMapping: Record<string, string> = {
     "Pendente": "pendente",
     "Em andamento": "em_andamento",
-    "Concluída": "concluida",
-    "Não Atendido": "nao_atendido",
+    "Atendida": "atendida",
+    "Não Atendida": "não_atendida",
   };
 
   const usuario = useUsuarioLogado();
@@ -456,8 +457,8 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
     setShowUploadModal(true);
     await new Promise(res => setTimeout(res, 50));
 
-    if (statusAtendimento === "Não Atendido" && !descricao.trim()) {
-      Alert.alert("Campo obrigatório", "Informe o motivo do não atendimento na descrição.");
+    if (statusAtendimento === "Não Atendida" && !motivoNaoAtendimento.trim()) {
+      Alert.alert("Campo obrigatório", "Informe o motivo do não atendimento.");
       setSending(false);
       return;
     }
@@ -513,7 +514,7 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
         grupoOcorrenciaId: grupo ? Number(grupo) : null,
         subgrupoOcorrenciaId: subgrupo ? Number(subgrupo) : null,
         viaturaId: viatura ? Number(viatura) : null,
-        motivoNaoAtendimento: statusAtendimento === "Não Atendido" ? (descricao.trim() || "Sem motivo informado") : "",
+        motivoNaoAtendimento: statusAtendimento === "Não Atendida" ? (motivoNaoAtendimento.trim() || "Sem motivo informado") : "",
         localizacao: {
           municipio: municipio || null,
           bairro: bairro || null,
@@ -631,6 +632,7 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
     setShowDatePicker(false);
     setStatusAtendimento("Pendente");
     setDescricao("");
+    setMotivoNaoAtendimento("");
 
     setNatureza(null);
     setGrupo(null);
@@ -766,22 +768,34 @@ export default function NovaOcorrenciaRN({ navigation }: any) {
                       <RNPickerSelect ref={statusPickerRef} onValueChange={setStatusAtendimento} value={statusAtendimento} items={[
                         { label: "Pendente", value: "Pendente" },
                         { label: "Em andamento", value: "Em andamento" },
-                        { label: "Concluída", value: "Concluída" },
-                        { label: "Não Atendido", value: "Não Atendido" },
+                        { label: "Atendida", value: "Atendida" },
+                        { label: "Não Atendida", value: "Não Atendida" },
                       ]} style={pickerStyle} placeholder={{}} Icon={() => <Ionicons name="chevron-down" size={24} color="#dc2625" />} />
                     </View>
                   </TouchableOpacity>
 
-                  {statusAtendimento === "Não Atendido" && (
+                  {statusAtendimento === "Não Atendida" && (
                     <View style={{ backgroundColor: "#fef3c7", padding: 12, borderRadius: 8, marginTop: 10 }}>
                       <Text style={{ color: "#92400e", fontWeight: "600" }}>
                         Obrigatório: Informe o motivo do não atendimento no campo abaixo.
                       </Text>
-                    </View>
+                      </View>
                   )}
-
                   <Text style={styles.label}>Descrição</Text>
                   <TextInput placeholder="Descreva a ocorrência..." placeholderTextColor="#666" multiline value={descricao} onChangeText={setDescricao} style={styles.textArea} />
+                  {statusAtendimento === "Não Atendida" && (
+                    <>
+                      <Text style={styles.label}>Motivo do não atendimento *</Text>
+                      <TextInput
+                        placeholder="Explique o motivo do não atendimento..."
+                        placeholderTextColor="#666"
+                        multiline
+                        value={motivoNaoAtendimento}
+                        onChangeText={setMotivoNaoAtendimento}
+                        style={[styles.textArea, { minHeight: 80 }]}
+                      />
+                    </>
+                  )}
                 </View>
               </ScrollView>
             </KeyboardAvoidingView>
